@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -8,16 +9,18 @@ import (
 	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
+	"github.com/go-logr/logr"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	kubernetes "k8s.io/client-go/kubernetes"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 	log "k8s.io/klog/v2"
 )
+
+var logger logr.Logger
 
 func connectToK8s() *kubernetes.Clientset {
 	home, exists := os.LookupEnv("HOME")
@@ -31,12 +34,13 @@ func connectToK8s() *kubernetes.Clientset {
 	if err != nil {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			log.Fatalln("failed to create K8s config: ", err.Error())
+			log.Info("failed to create K8s config:", err.Error())
 		}
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
+
 		log.Fatalln("Failed to create K8s clientset")
 	}
 
@@ -44,105 +48,30 @@ func connectToK8s() *kubernetes.Clientset {
 }
 
 func main() {
-
-	customCache := ttlcache.NewCache()
-	customCache.SetTTL(time.Duration(2 * time.Second))
+	opts := zap.Options{
+		Development: true,
+	}
+	opts.BindFlags(flag.CommandLine)
+	flag.Parse()
+	logger = zap.New(zap.UseFlagOptions(&opts))
 
 	clientset := connectToK8s()
+	customCache := ttlcache.NewCache()
+	customCache.SetTTL(time.Duration(1 * time.Minute))
 	stopCh := make(chan struct{})
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-
-	podInformer := informerFactory.Core().V1().Pods().Informer()
-	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(new interface{}) {
-			pod, ok := new.(*corev1.Pod)
-			if !ok {
-				log.Warningf("cannot convert to *v1.Pod: %v", new)
-				return
-			}
-			log.Infof("Pod %s Added", pod.Name)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			pod, ok := old.(*corev1.Pod)
-			if !ok {
-				log.Warningf("cannot convert oldObj to *v1.Pod: %v", old)
-				return
-			}
-			_, ok = new.(*corev1.Pod)
-			if !ok {
-				log.Warningf("cannot convert newObj to *v1.Pod: %v", new)
-				return
-			}
-			log.Infof("Pod %s Updated", pod.Name)
-		},
-		DeleteFunc: func(old interface{}) {
-			pod, ok := old.(*corev1.Pod)
-			if !ok {
-				log.Warningf("cannot convert to *v1.Pod: %v", old)
-				return
-			}
-			log.Infof("Pod %s Deleted", pod.Name)
-		},
-	})
-	//create indexer with index 'nodename'
-	podInformer.AddIndexers(map[string]cache.IndexFunc{
-		"nodename": func(obj interface{}) ([]string, error) {
-			var nodeNames []string
-			log.Infof("Pod: %v - Node: %v", obj.(*corev1.Pod).Name, obj.(*corev1.Pod).Spec.NodeName)
-			nodeNames = append(nodeNames, obj.(*corev1.Pod).Spec.NodeName)
-			return nodeNames, nil
-		},
-	})
-	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
-	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(new interface{}) {
-			replicaSet, ok := new.(*appsv1.ReplicaSet)
-			if !ok {
-				// log.Infof("Add:  Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
-
-				log.Warningf("cannot convert to *appsv1.ReplicaSet: %v", new)
-				return
-			}
-			log.Infof("replicaSet %s Added", replicaSet.Name)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			replicaSet, ok := old.(*appsv1.ReplicaSet)
-			if !ok {
-				// log.Infof("Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
-				log.Warningf("cannot convert oldObj to *appsv1.replicaSet: %v", old)
-				return
-			}
-			_, ok = new.(*appsv1.ReplicaSet)
-			if !ok {
-				log.Warningf("cannot convert newObj to *appsv1.replicaSet: %v", new)
-				return
-			}
-			log.Infof("replicaSet %s Updated", replicaSet.Name)
-		},
-		DeleteFunc: func(old interface{}) {
-			replicaSet, ok := old.(*appsv1.ReplicaSet)
-			if !ok {
-				log.Warningf("cannot convert to *appsv1.replicaSet: %v", old)
-				return
-			}
-			log.Infof("replicaSet %s Deleted", replicaSet.Name)
-		},
-	})
-	replicaSetLister := informerFactory.Apps().V1().ReplicaSets().Lister()
+	b := routes.BaseHandler(informerFactory, customCache, logger)
 
 	informerFactory.Start(stopCh)
 	cache.WaitForCacheSync(stopCh)
 
-	c := routes.InitCache(podInformer, replicaSetLister, customCache)
-
-	http.HandleFunc("/", c.Index)
-	http.HandleFunc("/filter", c.Filter)
+	http.HandleFunc("/", b.Index)
+	http.HandleFunc("/foo/filter", b.FooFilter)
 	s := &http.Server{
 		Addr: ":8080",
 	}
+
 	if err := s.ListenAndServe(); err != nil {
-		log.Fatal(err)
+		logger.Error(err, "Server error")
 	}
 }
-
-// pod informer = list == replica set check if alerady exist node index

@@ -10,11 +10,14 @@ import (
 	"strconv"
 
 	"github.com/ReneKroon/ttlcache/v2"
+	"github.com/go-logr/logr"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 
-	v1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+
 	applister "k8s.io/client-go/listers/apps/v1"
-	log "k8s.io/klog/v2"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
 )
 
@@ -22,9 +25,89 @@ type Cache struct {
 	podInformer      cache.SharedIndexInformer
 	replicaSetLister applister.ReplicaSetLister
 	customCache      *ttlcache.Cache
+	log              logr.Logger
 }
 
-func InitCache(podInformer cache.SharedIndexInformer, replicaSetLister applister.ReplicaSetLister, customCache *ttlcache.Cache) *Cache {
+func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *ttlcache.Cache, logger logr.Logger) *Cache {
+
+	podInformer := informerFactory.Core().V1().Pods().Informer()
+	log := logger.WithName("BaseHandler")
+	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			pod, ok := new.(*corev1.Pod)
+			if !ok {
+				log.Info("cannot convert to *v1.Pod:", new)
+				return
+			}
+			log.Info("Added", "Pod:", pod.Name)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			pod, ok := old.(*corev1.Pod)
+			if !ok {
+				log.Info("cannot convert oldObj to", "*v1.Pod:", old)
+				return
+			}
+			_, ok = new.(*corev1.Pod)
+			if !ok {
+				log.Info("cannot convert newObj to", "*v1.Pod:", new)
+				return
+			}
+			log.Info("Updated", "Pod:", pod.Name)
+		},
+		DeleteFunc: func(old interface{}) {
+			pod, ok := old.(*corev1.Pod)
+			if !ok {
+				log.Info("cannot convert to", "*v1.Pod:", old)
+				return
+			}
+			log.Info("Deleted", "Pod:", pod.Name)
+		},
+	})
+	//create indexer with index 'nodename'
+	podInformer.AddIndexers(map[string]cache.IndexFunc{
+		"nodename": func(obj interface{}) ([]string, error) {
+			var nodeNames []string
+			// log.Info("Pod: %v - Node: %v", obj.(*corev1.Pod).Name, obj.(*corev1.Pod).Spec.NodeName)
+			nodeNames = append(nodeNames, obj.(*corev1.Pod).Spec.NodeName)
+			return nodeNames, nil
+		},
+	})
+	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
+	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(new interface{}) {
+			replicaSet, ok := new.(*appsv1.ReplicaSet)
+			if !ok {
+				// log.Infof("Add:  Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
+
+				log.Info("cannot convert to", "*appsv1.ReplicaSet:", new)
+				return
+			}
+			log.Info("Added", "ReplicaSet:", replicaSet.Name)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			replicaSet, ok := old.(*appsv1.ReplicaSet)
+			if !ok {
+				// log.Infof("Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
+				log.Info("cannot convert oldObj to", "*appsv1.replicaSet:", old)
+				return
+			}
+			_, ok = new.(*appsv1.ReplicaSet)
+			if !ok {
+				log.Info("cannot convert newObj to", "*appsv1.replicaSet:", new)
+				return
+			}
+			log.Info("Updated", "Replicaset:", replicaSet.Name)
+		},
+		DeleteFunc: func(old interface{}) {
+			replicaSet, ok := old.(*appsv1.ReplicaSet)
+			if !ok {
+				log.Info("cannot convert to", "*appsv1.replicaSet:", old)
+				return
+			}
+			log.Info("Deleted", "ReplicaSet:", replicaSet.Name)
+		},
+	})
+	replicaSetLister := informerFactory.Apps().V1().ReplicaSets().Lister()
 	return &Cache{
 		podInformer:      podInformer,
 		replicaSetLister: replicaSetLister,
@@ -38,12 +121,13 @@ func (c *Cache) Index(w http.ResponseWriter, r *http.Request) {
 
 func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 	pod := args.Pod
-	canSchedule := make([]v1.Node, 0, len(args.Nodes.Items))
+	canSchedule := make([]corev1.Node, 0, len(args.Nodes.Items))
 	canNotSchedule := make(map[string]string)
 	var podNames []string
 	var maxPodsPerNode int
+	c.log.Info("Request for Pod %v", pod.Name)
+	log := c.log.WithName(pod.Name)
 
-	log.Infof("Request for Pod %v", pod.Name)
 	if pod.Annotations != nil {
 		if podsPerNode, ok := pod.Annotations["podspernode"]; ok {
 			maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
@@ -53,31 +137,28 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	}
 	for _, node := range args.Nodes.Items {
 
-		ok, msg := c.checkfitness(node, pod, maxPodsPerNode)
-		if ok == true {
-			log.Infof("Pod %s can be schedule on node %s \n", pod.Name, node.Name)
+		ok, msg := c.checkfitness(node, pod, maxPodsPerNode, log)
+		if ok {
+			log.Info("can be schedule on node", "NodeName:", pod.Name, node.Name)
 			val, err := c.customCache.Get(node.Name)
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
 				c.customCache.Set(node.Name, podNames)
-				log.Infof("podNames %v", podNames)
 			} else {
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
-				log.Infof("podNames %v", podNames)
 			}
-
 			c.customCache.Set(node.Name, podNames)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
-			log.Infof("Pod %s cannot schedule on node %s | Reason: %s \n", pod.Name, node.Name, msg)
+			log.Info("Cannot schedule on node", "NodeName:", node.Name, "Reason:", msg)
 			canNotSchedule[node.Name] = msg
 		}
 	}
 
 	result := schedulerapi.ExtenderFilterResult{
-		Nodes: &v1.NodeList{
+		Nodes: &corev1.NodeList{
 			Items: canSchedule,
 		},
 		FailedNodes: canNotSchedule,
@@ -85,14 +166,14 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	}
 	return &result
 }
-func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int) (bool, string) {
+func (c *Cache) checkfitness(node corev1.Node, pod *corev1.Pod, maxPodsPerNode int, log logr.Logger) (bool, string) {
 	var replicasetName string
 	var deploymentName string
 	var valid bool = false
 	//check if pod is of replicaSet
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
-			log.Infof("Its of replicaset %s", owner.Name)
+			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
 
 			replicasetName = owner.Name
 			valid = true
@@ -101,7 +182,7 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int) (boo
 	}
 
 	if !valid {
-		log.Infof("Pod is not of ReplicaSet")
+		log.Info("Pod is not of ReplicaSet")
 		return true, ""
 	}
 	//get replicaset
@@ -109,14 +190,14 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int) (boo
 	//check if pod is of deployment
 	for _, owner := range replicaSet.OwnerReferences {
 		if owner.Kind == "Deployment" {
-			log.Infof("Its of Deployment %v", owner.Name)
+			log.Info("Its of Deployment %v", owner.Name)
 			deploymentName = owner.Name
 			valid = true
 			break
 		}
 	}
 	if !valid {
-		log.Infof("Pod is not of Deployment")
+		log.Info("Pod is not of Deployment")
 		return true, ""
 	}
 
@@ -134,24 +215,24 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int) (boo
 		val, err := c.customCache.Get(node.Name)
 		if err == ttlcache.ErrNotFound {
 			for _, pod := range pods {
-				log.Info("Checking pod %v", pod.(*v1.Pod).Name)
-				if re.MatchString(pod.(*v1.Pod).Name) {
+				if re.MatchString(pod.(*corev1.Pod).Name) {
 					podCount++
 				}
 			}
 		} else {
 			for _, podName := range val.([]string) {
-				log.Infof("Entered for custom cache")
+				log.Info("Using custom cache")
 				if re.MatchString(podName) {
 					podCount++
 				}
-				log.Infof("Entered for custom cache: Count %v", podCount)
+				log.Info("Custom cache: Count %v", podCount)
 			}
 		}
-		log.Infof("Pod Count: %v", podCount)
+		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount:", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
 		if podCount == 0 {
 			return true, ""
 		}
+
 		return false, "Cannot schedule: Pod of deployment already exist."
 	} else if replicaCount > 3 {
 		pods, err := c.podInformer.GetIndexer().ByIndex("nodename", node.Name)
@@ -162,30 +243,28 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int) (boo
 		val, err := c.customCache.Get(node.Name)
 		if err == ttlcache.ErrNotFound {
 			for _, pod := range pods {
-				log.Info("Checking pod %v", pod.(*v1.Pod).Name)
-				if re.MatchString(pod.(*v1.Pod).Name) {
+				if re.MatchString(pod.(*corev1.Pod).Name) {
 					podCount++
 				}
 			}
 		} else {
 			for _, podName := range val.([]string) {
-				log.Infof("Entered for custom cache")
 				if re.MatchString(podName) {
 					podCount++
 				}
-				log.Infof("Entered for custom cache: Count %v", podCount)
+				log.Info("Using custom cache", "Count", podCount)
 			}
 		}
-		log.Infof("replicacount: %v |Pod Count >3: %v | maxpods: %v", replicaCount, podCount, maxPodsPerNode)
+		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount:", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
 		if maxPodsPerNode > podCount {
 			return true, ""
 		}
 		return false, "Cannot schedule: Maximum number of pods already running."
 	}
-	return false, "Some error"
+	return false, "Other error"
 }
 
-func (c *Cache) Filter(w http.ResponseWriter, r *http.Request) {
+func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
 
 	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
@@ -200,7 +279,7 @@ func (c *Cache) Filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
-		log.Fatalln(err)
+		c.log.Error(err, "error in json marshal")
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
