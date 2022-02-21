@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"ridecell-k8s-scheduler-extender/pkg/routes"
 	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
@@ -17,12 +16,12 @@ import (
 
 	kubernetes "k8s.io/client-go/kubernetes"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
-	log "k8s.io/klog/v2"
+	extenderCache "ridecell-k8s-scheduler-extender/pkg/cache"
 )
 
 var logger logr.Logger
 
-func connectToK8s() *kubernetes.Clientset {
+func connectToK8s(logger logr.Logger) *kubernetes.Clientset {
 	home, exists := os.LookupEnv("HOME")
 	if !exists {
 		home = "/root"
@@ -34,34 +33,40 @@ func connectToK8s() *kubernetes.Clientset {
 	if err != nil {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			log.Info("failed to create K8s config:", err.Error())
+			logger.Error(err, "failed to create K8s config")
 		}
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-
-		log.Fatalln("Failed to create K8s clientset")
+		logger.Error(err, "Failed to create K8s clientset")
 	}
 
 	return clientset
 }
-
-func main() {
+func createLogger() logr.Logger {
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	logger = zap.New(zap.UseFlagOptions(&opts))
+	return logger
+}
+func main() {
 
-	clientset := connectToK8s()
+	logger := createLogger()
+	clientset := connectToK8s(logger)
+
+	//init temprory cache
 	customCache := ttlcache.NewCache()
 	customCache.SetTTL(time.Duration(1 * time.Minute))
-	stopCh := make(chan struct{})
-	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	b := routes.BaseHandler(informerFactory, customCache, logger)
 
+	// setup k8 informer factory
+	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
+	b := extenderCache.BaseHandler(informerFactory, customCache, logger)
+
+	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
 	cache.WaitForCacheSync(stopCh)
 
