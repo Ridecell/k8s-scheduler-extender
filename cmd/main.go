@@ -5,18 +5,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"ridecell-k8s-scheduler-extender/pkg/cache"
 	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	kubernetes "k8s.io/client-go/kubernetes"
+	clientCache "k8s.io/client-go/tools/cache"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
-	extenderCache "ridecell-k8s-scheduler-extender/pkg/cache"
 )
 
 var logger logr.Logger
@@ -54,21 +54,23 @@ func createLogger() logr.Logger {
 	return logger
 }
 func main() {
-
+    //init zap logger
 	logger := createLogger()
+
+	//init k8s client
 	clientset := connectToK8s(logger)
 
 	//init temprory cache
 	customCache := ttlcache.NewCache()
 	customCache.SetTTL(time.Duration(1 * time.Minute))
 
-	// setup k8 informer factory
+	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	b := extenderCache.BaseHandler(informerFactory, customCache, logger)
-
+	b := cache.BaseHandler(informerFactory, customCache, logger)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
-	cache.WaitForCacheSync(stopCh)
+	clientCache.WaitForCacheSync(stopCh)
+
 
 	http.HandleFunc("/", b.Index)
 	http.HandleFunc("/foo/filter", b.FooFilter)

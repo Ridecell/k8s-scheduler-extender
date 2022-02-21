@@ -4,11 +4,10 @@ go 1.17
 
 require (
 	github.com/ReneKroon/ttlcache/v2 v2.11.0
-	github.com/go-logr/logr v1.2.0
-	k8s.io/api v0.23.3
-	k8s.io/client-go v0.23.3
-	k8s.io/klog/v2 v2.30.0
-	k8s.io/kube-scheduler v0.23.3
+	github.com/go-logr/logr v1.2.2
+	k8s.io/api v0.23.4
+	k8s.io/client-go v0.23.4
+	k8s.io/kube-scheduler v0.23.4
 	sigs.k8s.io/controller-runtime v0.11.1
 )
 
@@ -40,7 +39,8 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
-	k8s.io/apimachinery v0.23.3 // indirect
+	k8s.io/apimachinery v0.23.4 // indirect
+	k8s.io/klog/v2 v2.30.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20211115234752-e816edb12b65 // indirect
 	k8s.io/utils v0.0.0-20211116205334-6203023598ed // indirect
 	sigs.k8s.io/json v0.0.0-20211020170558-c049b76a60c6 // indirect

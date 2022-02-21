@@ -36,7 +36,7 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	canNotSchedule := make(map[string]string)
 	var podNames []string
 	var maxPodsPerNode int
-	c.Log.Info("Request for Pod %v", pod.Name)
+	c.Log.Info("Request for Pod", "PodName", pod.Name)
 	log := c.Log.WithName(pod.Name)
 
 	if pod.Annotations != nil {
@@ -49,8 +49,8 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	for _, node := range args.Nodes.Items {
 
 		ok, msg := c.checkfitness(node, pod, maxPodsPerNode, log)
-		if ok == true {
-			log.Info("can be schedule on node", "NodeName:", pod.Name, node.Name)
+		if ok {
+			log.Info("can be schedule on node", "NodeName", node.Name)
 			val, err := c.CustomCache.Get(node.Name)
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
@@ -63,7 +63,7 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
-			log.Info("Cannot schedule on node", "NodeName:", node.Name, "Reason:", msg)
+			log.Info("Cannot schedule on node", "NodeName", node.Name, "Reason", msg)
 			canNotSchedule[node.Name] = msg
 		}
 	}
@@ -100,7 +100,7 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int, log 
 	//check if pod is of deployment
 	for _, owner := range replicaSet.OwnerReferences {
 		if owner.Kind == "Deployment" {
-			log.Info("Its of Deployment %v", owner.Name)
+			log.Info("Deployment Name:", "DeploymentName", owner.Name)
 			deploymentName = owner.Name
 			valid = true
 			break
@@ -131,14 +131,13 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int, log 
 			}
 		} else {
 			for _, podName := range val.([]string) {
-				log.Info("Using custom cache")
 				if re.MatchString(podName) {
 					podCount++
 				}
-				log.Info("Custom cache: Count %v", podCount)
 			}
+			log.Info("Using custom cache", "PodCount", podCount)
 		}
-		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount:", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
+		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
 		if podCount == 0 {
 			return true, ""
 		}
@@ -162,10 +161,10 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int, log 
 				if re.MatchString(podName) {
 					podCount++
 				}
-				log.Info("Using custom cache", "Count", podCount)
 			}
+			log.Info("Using custom cache", "PodCount", podCount)
 		}
-		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount:", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
+		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
 		if maxPodsPerNode > podCount {
 			return true, ""
 		}
