@@ -50,26 +50,23 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 			}
 			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 			// update custom cache
-			routes.UpdateCache(pod.Name, pod.Spec.NodeName,logger)
+			routes.UpdateCache(pod.Name, pod.Spec.NodeName,log)
 		},
 	})
 	//create indexer with index 'nodename'
 	podInformer.AddIndexers(map[string]cache.IndexFunc{
 		"nodename": func(obj interface{}) ([]string, error) {
 			var nodeNames []string
-			// log.Info("Pod: %v - Node: %v", obj.(*corev1.Pod).Name, obj.(*corev1.Pod).Spec.NodeName)
 			nodeNames = append(nodeNames, obj.(*corev1.Pod).Spec.NodeName)
 			return nodeNames, nil
 		},
 	})
-	
+
 	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			replicaSet, ok := new.(*appsv1.ReplicaSet)
 			if !ok {
-				// log.Infof("Add:  Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
-
 				log.Info("cannot convert to", "*appsv1.ReplicaSet:", new)
 				return
 			}
@@ -78,7 +75,6 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 		UpdateFunc: func(old, new interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				// log.Infof("Replica: %v| Ready replica: %v | Available replica: %v",replicaSet.Status.Replicas,replicaSet.Status.ReadyReplicas, replicaSet.Status.AvailableReplicas)
 				log.Info("cannot convert oldObj to", "*appsv1.replicaSet:", old)
 				return
 			}
