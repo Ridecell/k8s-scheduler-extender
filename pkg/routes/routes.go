@@ -21,7 +21,7 @@ import (
 type Cache struct {
 	PodInformer      cache.SharedIndexInformer
 	ReplicaSetLister applister.ReplicaSetLister
-	CustomCache      *ttlcache.Cache
+	// CustomCache      *ttlcache.Cache
 	Log              logr.Logger
 }
 
@@ -29,6 +29,31 @@ type PodData struct {
 	replicaCount   int32
 	maxPodsPerNode int
 	deploymentName string
+}
+
+// custom cache Setup
+var customCache *ttlcache.Cache
+
+func SetCache(cache *ttlcache.Cache){
+    customCache=cache
+}
+func  UpdateCache(podName string, nodeName string,log logr.Logger) {
+	val, err := customCache.Get(nodeName)
+	if err != nil && err != ttlcache.ErrNotFound {
+		log.Error(err, "Custom Cache Error")
+	}
+	if val != nil {
+		podNames := val.([]string)
+		for i, pod := range podNames {
+			if pod == podName {
+				podNames[i] = podNames[len(podNames)-1]
+				podNames = podNames[:len(podNames)-1]
+				customCache.Set(nodeName, podNames)
+				log.Info("Custom Cache Updated", "Deleted Pod", podName)
+				break
+			}
+		}
+	}
 }
 
 func (c *Cache) Index(w http.ResponseWriter, r *http.Request) {
@@ -80,18 +105,18 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 		ok, msg := c.checkfitness(node, pod, podData, log)
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
-			val, err := c.CustomCache.Get(node.Name)
+			val, err := customCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
 				log.Error(err, "Custom Cache Error")
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
-				c.CustomCache.Set(node.Name, podNames)
+				customCache.Set(node.Name, podNames)
 			} else {
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
 			}
-			c.CustomCache.Set(node.Name, podNames)
+			customCache.Set(node.Name, podNames)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
@@ -133,7 +158,7 @@ func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 	//get replicaset
 	replicaSet, err := c.ReplicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
 	if err != nil {
-		log.Error(err,"Error getting replicaset from store")
+		log.Error(err, "Error getting replicaset from store")
 		return data, false
 	}
 	if podsPerNode, ok := replicaSet.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; ok {
@@ -141,7 +166,7 @@ func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 			maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
 		} else {
 			maxPodsPerNode = 2
-		}	
+		}
 	} else {
 		return data, false
 	}
@@ -158,11 +183,11 @@ func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 		log.Info("Pod is not of Deployment")
 		return data, false
 	}
-	
+
 	data.replicaCount = *replicaSet.Spec.Replicas
 	data.maxPodsPerNode = maxPodsPerNode
 	data.deploymentName = deploymentName
-	log.Info("Deployment info","MaxPods",maxPodsPerNode,"Replicacount",data.replicaCount)
+	log.Info("Deployment info", "MaxPods", maxPodsPerNode, "Replicacount", data.replicaCount)
 	return data, true
 }
 
@@ -180,7 +205,7 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, podData PodData, log log
 	for _, pod := range pods {
 		podsSet[pod.(*v1.Pod).Name] = pod.(*v1.Pod).Name
 	}
-	val, err := c.CustomCache.Get(node.Name)
+	val, err := customCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
 		log.Error(err, "Custom Cache Error")
 	}
