@@ -14,8 +14,12 @@ import (
 
 func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *ttlcache.Cache, logger logr.Logger) *routes.Cache {
 
-	podInformer := informerFactory.Core().V1().Pods().Informer()
 	log := logger.WithName("Informer")
+	// set custom cache
+	routes.SetCache(customCache)
+    
+	// watch events
+	podInformer := informerFactory.Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)
@@ -45,6 +49,8 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 				return
 			}
 			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
+			// update custom cache
+			routes.UpdateCache(pod.Name, pod.Spec.NodeName,logger)
 		},
 	})
 	//create indexer with index 'nodename'
@@ -56,6 +62,7 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 			return nodeNames, nil
 		},
 	})
+	
 	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
@@ -95,7 +102,7 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 	return &routes.Cache{
 		PodInformer:      podInformer,
 		ReplicaSetLister: replicaSetLister,
-		CustomCache:      customCache,
-		Log:              logger,
+		// CustomCache:      customCache,
+		Log: logger,
 	}
 }
