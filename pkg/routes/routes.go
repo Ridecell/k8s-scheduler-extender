@@ -52,6 +52,9 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
 			val, err := c.CustomCache.Get(node.Name)
+			if err != nil && err != ttlcache.ErrNotFound {
+				log.Error(err, "Custom Cache Error")
+			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
 				c.CustomCache.Set(node.Name, podNames)
@@ -77,15 +80,16 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	}
 	return &result
 }
+
 func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int, log logr.Logger) (bool, string) {
 	var replicasetName string
 	var deploymentName string
 	var valid bool = false
+	podsSet := make(map[string]string)
 	//check if pod is of replicaSet
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
 			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
-
 			replicasetName = owner.Name
 			valid = true
 			break
@@ -122,49 +126,52 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, maxPodsPerNode int, log 
 		if err != nil {
 			return false, err.Error()
 		}
+		for _, pod := range pods {
+			podsSet[pod.(*v1.Pod).Name] = pod.(*v1.Pod).Name
+		}
 		val, err := c.CustomCache.Get(node.Name)
-		if err == ttlcache.ErrNotFound {
-			for _, pod := range pods {
-				if re.MatchString(pod.(*v1.Pod).Name) {
-					podCount++
-				}
-			}
-		} else {
+		if err != nil && err != ttlcache.ErrNotFound {
+			log.Error(err, "Custom Cache Error")
+		}
+		if val != nil {
 			for _, podName := range val.([]string) {
-				if re.MatchString(podName) {
-					podCount++
-				}
+				podsSet[podName] = podName
 			}
-			log.Info("Using custom cache", "PodCount", podCount)
+		}
+		for _, pod := range podsSet {
+			if re.MatchString(pod) {
+				podCount++
+			}
 		}
 		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
 		if podCount == 0 {
 			return true, ""
 		}
-
 		return false, "Cannot schedule: Pod of deployment already exist."
 	} else if replicaCount > 3 {
 		pods, err := c.PodInformer.GetIndexer().ByIndex("nodename", node.Name)
 		if err != nil {
 			return false, err.Error()
 		}
-
+		for _, pod := range pods {
+			podsSet[pod.(*v1.Pod).Name] = pod.(*v1.Pod).Name
+		}
 		val, err := c.CustomCache.Get(node.Name)
-		if err == ttlcache.ErrNotFound {
-			for _, pod := range pods {
-				if re.MatchString(pod.(*v1.Pod).Name) {
-					podCount++
-				}
-			}
-		} else {
+		if err != nil && err != ttlcache.ErrNotFound {
+			log.Error(err, "Custom Cache Error")
+		}
+		if val != nil {
 			for _, podName := range val.([]string) {
-				if re.MatchString(podName) {
-					podCount++
-				}
+				podsSet[podName] = podName
 			}
-			log.Info("Using custom cache", "PodCount", podCount)
+		}
+		for _, pod := range podsSet {
+			if re.MatchString(pod) {
+				podCount++
+			}
 		}
 		log.Info("Deployment info on node", "NodeName", node.Name, "ReplicaCount", replicaCount, "PodCount", podCount, "MaxPods", maxPodsPerNode)
+		
 		if maxPodsPerNode > podCount {
 			return true, ""
 		}

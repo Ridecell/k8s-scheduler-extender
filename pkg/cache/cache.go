@@ -36,7 +36,7 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 				log.Info("cannot convert newObj to", "*v1.Pod:", new)
 				return
 			}
-			log.Info("Updated", "Pod:", pod.Name)
+			log.Info("Updated", "Pod:", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 		DeleteFunc: func(old interface{}) {
 			pod, ok := old.(*corev1.Pod)
@@ -44,7 +44,7 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 				log.Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
-			log.Info("Deleted", "Pod:", pod.Name)
+			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
 	//create indexer with index 'nodename'
@@ -96,6 +96,6 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 		PodInformer:      podInformer,
 		ReplicaSetLister: replicaSetLister,
 		CustomCache:      customCache,
-		Log: logger,
+		Log:              logger,
 	}
 }
