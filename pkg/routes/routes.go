@@ -21,8 +21,8 @@ import (
 type Cache struct {
 	PodInformer      cache.SharedIndexInformer
 	ReplicaSetLister applister.ReplicaSetLister
-	// CustomCache      *ttlcache.Cache
 	Log              logr.Logger
+	// CustomCache      *ttlcache.Cache
 }
 
 type PodData struct {
@@ -34,10 +34,10 @@ type PodData struct {
 // custom cache Setup
 var customCache *ttlcache.Cache
 
-func SetCache(cache *ttlcache.Cache){
-    customCache=cache
+func SetCache(cache *ttlcache.Cache) {
+	customCache = cache
 }
-func  UpdateCache(podName string, nodeName string,log logr.Logger) {
+func UpdateCache(podName string, nodeName string, log logr.Logger) {
 	val, err := customCache.Get(nodeName)
 	if err != nil && err != ttlcache.ErrNotFound {
 		log.Error(err, "Custom Cache Error")
@@ -48,9 +48,13 @@ func  UpdateCache(podName string, nodeName string,log logr.Logger) {
 			if pod == podName {
 				podNames[i] = podNames[len(podNames)-1]
 				podNames = podNames[:len(podNames)-1]
-				customCache.Set(nodeName, podNames)
-				log.Info("Custom Cache Updated", "Deleted Pod", podName)
-				break
+				err := customCache.Set(nodeName, podNames)
+				if err != nil {
+					log.Error(err, "Set cache error")
+					return
+				}
+				log.Info("Custom Cache Updated", "Deleted Pod", podName, "Node", nodeName)
+				return
 			}
 		}
 	}
@@ -111,12 +115,15 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
-				customCache.Set(node.Name, podNames)
 			} else {
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
 			}
-			customCache.Set(node.Name, podNames)
+			err = customCache.Set(node.Name, podNames)
+			if err != nil {
+				log.Error(err, "Set cache error")
+			}
+			log.Info("Pod added in customCache", "PodName", pod.Name)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
