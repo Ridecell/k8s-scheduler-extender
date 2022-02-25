@@ -84,7 +84,10 @@ func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(response)
+		_, err := w.Write(response)
+		if err != nil {
+			c.Log.Error(err, "error in writing response")
+		}
 	}
 }
 

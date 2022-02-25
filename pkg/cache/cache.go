@@ -54,13 +54,16 @@ func BaseHandler(informerFactory informers.SharedInformerFactory, customCache *t
 		},
 	})
 	//create indexer with index 'nodename'
-	podInformer.AddIndexers(map[string]cache.IndexFunc{
+	err:=podInformer.AddIndexers(map[string]cache.IndexFunc{
 		"nodename": func(obj interface{}) ([]string, error) {
 			var nodeNames []string
 			nodeNames = append(nodeNames, obj.(*corev1.Pod).Spec.NodeName)
 			return nodeNames, nil
 		},
 	})
+	if err!=nil{
+		log.Error(err,"Informer error")
+	}
 
 	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{

@@ -56,13 +56,16 @@ func createLogger() logr.Logger {
 func main() {
     //init zap logger
 	logger := createLogger()
-
+    log:=logger.WithName("Main")
 	//init k8s client
-	clientset := connectToK8s(logger)
-
+	clientset := connectToK8s(log)
+    
 	//init temprory cache
 	customCache := ttlcache.NewCache()
-	customCache.SetTTL(time.Duration(1 * time.Minute))
+	err:=customCache.SetTTL(time.Duration(1 * time.Minute))
+	if err !=nil{
+		log.Error(err,"Custom cache error")
+	}
 
 	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
@@ -79,6 +82,6 @@ func main() {
 	}
 
 	if err := s.ListenAndServe(); err != nil {
-		logger.Error(err, "Server error")
+		log.Error(err, "Server error")
 	}
 }
