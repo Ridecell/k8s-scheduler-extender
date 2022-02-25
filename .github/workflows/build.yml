@@ -5,7 +5,9 @@ on:
 jobs:
   lint:
     name: lint
-    runs-on: self-hosted
+    runs-on: ubuntu-20.04
+    env:
+      TOKEN: ${{ secrets.USER_GITHUB_TOKEN }}
     steps:
       - name: Setup go 1.17
         uses: actions/setup-go@v2
@@ -22,7 +24,7 @@ jobs:
       - name: Install lint
         run: |
           # binary will be $(go env GOPATH)/bin/golangci-lint
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.41.1
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.44.2
       - name: Run lint
         run: |
           golangci-lint run --timeout 5m
@@ -52,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: us.gcr.io/ridecell-1/
+          images: us.gcr.io/ridecell-1/k8s-scheduler-extender
           tags: |
             type=raw,value={{date 'X'}}-{{branch}}-{{sha}}
 
