@@ -1,6 +1,9 @@
 package cache
 
 import (
+	"time"
+
+	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/listers/apps/v1"
@@ -14,15 +17,23 @@ type Cache struct {
 	PodInformer      cache.SharedIndexInformer
 	ReplicaSetLister v1.ReplicaSetLister
 	Log              logr.Logger
+	TTLCache         *ttlcache.Cache
 	informerFactory  informers.SharedInformerFactory
 }
 
 func NewInformerCache(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *Cache) {
-	// log := logger.WithName("Informer")
-	// set ttl cache
+	log := logger.WithName("Informer")
+	//init temprory cache
+	ttlCache := ttlcache.NewCache()
+	// it takes 1-2 seconds to schedule a pod on a node, so the indexer doesn’t get updated immediately so need to maintain a temporary cache  for a minute
+	err := ttlCache.SetTTL(time.Duration(1 * time.Minute))
+	if err != nil {
+		log.Error(err, "Failed to create ttl cache")
+	}
 	c = &Cache{
-		Log:              logger,
-		informerFactory:  informerFactory,
+		Log:             logger,
+		informerFactory: informerFactory,
+		TTLCache: ttlCache,
 	}
 	c.PodInformer = c.GetPodInformer()
 	c.ReplicaSetLister = c.GetReplicaSetLister()

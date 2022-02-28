@@ -57,6 +57,7 @@ func main() {
 	//init zap logger
 	logger := createLogger()
 	log := logger.WithName("Main")
+
 	//init k8s client
 	clientset := connectToK8s(log)
 
