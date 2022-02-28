@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-logr/logr"
@@ -16,6 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	applister "k8s.io/client-go/listers/apps/v1"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
+	informerCache "ridecell-k8s-scheduler-extender/pkg/cache"
 )
 
 type Cache struct {
@@ -31,42 +33,60 @@ type PodData struct {
 	deploymentName string
 }
 
-// custom cache Setup
-var customCache *ttlcache.Cache
+// ttl cache Setup
+var ttlCache *ttlcache.Cache
 
 func SetCache(cache *ttlcache.Cache) {
-	customCache = cache
-}
-func UpdateCache(podName string, nodeName string, log logr.Logger) {
-	val, err := customCache.Get(nodeName)
-	if err != nil && err != ttlcache.ErrNotFound {
-		log.Error(err, "Custom Cache Error")
-	}
-	if val != nil {
-		podNames := val.([]string)
-		for i, pod := range podNames {
-			if pod == podName {
-				podNames[i] = podNames[len(podNames)-1]
-				podNames = podNames[:len(podNames)-1]
-				err := customCache.Set(nodeName, podNames)
-				if err != nil {
-					log.Error(err, "Set cache error")
-					return
-				}
-				log.Info("Custom Cache Updated", "Deleted Pod", podName, "Node", nodeName)
-				return
-			}
-		}
-	}
+	ttlCache = cache
 }
 
-func (c *Cache) Index(w http.ResponseWriter, r *http.Request) {
+// func UpdateCache(podName string, nodeName string, log logr.Logger) {
+// 	val, err := ttlCache.Get(nodeName)
+// 	if err != nil && err != ttlcache.ErrNotFound {
+// 		log.Error(err, "ttl Cache Error")
+// 	}
+// 	if val != nil {
+// 		podNames := val.([]string)
+// 		for i, pod := range podNames {
+// 			if pod == podName {
+// 				podNames[i] = podNames[len(podNames)-1]
+// 				podNames = podNames[:len(podNames)-1]
+// 				err := ttlCache.Set(nodeName, podNames)
+// 				if err != nil {
+// 					log.Error(err, "Set cache error")
+// 					return
+// 				}
+// 				log.Info("ttl Cache Updated", "Deleted Pod", podName, "Node", nodeName)
+// 				return
+// 			}
+// 		}
+// 	}
+// }
+
+func IndexRoute() {
+	http.HandleFunc("/index", Index)
+}
+func Index(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Welcome to k8s-scheduler-extender!\n")
-
 }
 
+func FilterRoute(ic *informerCache.Cache) {
+	c := &Cache{
+		PodInformer:      ic.PodInformer,
+		ReplicaSetLister: ic.ReplicaSetLister,
+		Log:              ic.Log,
+	}
+	http.HandleFunc("/foo/filter", c.FooFilter)
+}
 func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
-
+	//init temprory cache
+	ttlCache := ttlcache.NewCache()
+	// it takes 1-2 seconds to schedule a pod on a node, so the indexer doesn’t get updated immediately so need to maintain a temporary cache  for a minute
+	err := ttlCache.SetTTL(time.Duration(1 * time.Minute))
+	if err != nil {
+		c.Log.Error(err, "Failed to create ttl cache")
+	}
+	SetCache(ttlCache)
 	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
 	var extenderArgs schedulerapi.ExtenderArgs
@@ -112,9 +132,9 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 		ok, msg := c.checkfitness(node, pod, podData, log)
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
-			val, err := customCache.Get(node.Name)
+			val, err := ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
-				log.Error(err, "Custom Cache Error")
+				log.Error(err, "ttl Cache Error")
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
@@ -122,11 +142,11 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
 			}
-			err = customCache.Set(node.Name, podNames)
+			err = ttlCache.Set(node.Name, podNames)
 			if err != nil {
-				log.Error(err, "Set cache error")
+				log.Error(err, "Set ttl cache error")
 			}
-			log.Info("Pod added in customCache", "PodName", pod.Name)
+			log.Info("Pod added in ttlCache", "PodName", pod.Name)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
@@ -203,7 +223,6 @@ func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 
 func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, podData PodData, log logr.Logger) (bool, string) {
 	var re *regexp.Regexp
-
 	podsSet := make(map[string]string)
 	podCount := 0
 
@@ -215,9 +234,9 @@ func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, podData PodData, log log
 	for _, pod := range pods {
 		podsSet[pod.(*v1.Pod).Name] = pod.(*v1.Pod).Name
 	}
-	val, err := customCache.Get(node.Name)
+	val, err := ttlCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
-		log.Error(err, "Custom Cache Error")
+		log.Error(err, "Failed to create ttl cache")
 	}
 	if val != nil {
 		for _, podName := range val.([]string) {

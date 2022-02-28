@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"ridecell-k8s-scheduler-extender/pkg/cache"
+	"ridecell-k8s-scheduler-extender/pkg/routes"
 	"time"
 
-	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
@@ -54,29 +54,22 @@ func createLogger() logr.Logger {
 	return logger
 }
 func main() {
-    //init zap logger
+	//init zap logger
 	logger := createLogger()
-    log:=logger.WithName("Main")
+	log := logger.WithName("Main")
 	//init k8s client
 	clientset := connectToK8s(log)
-    
-	//init temprory cache
-	customCache := ttlcache.NewCache()
-	err:=customCache.SetTTL(time.Duration(1 * time.Minute))
-	if err !=nil{
-		log.Error(err,"Custom cache error")
-	}
 
 	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	b := cache.BaseHandler(informerFactory, customCache, logger)
+	b := cache.NewInformerCache(informerFactory, logger)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
 	clientCache.WaitForCacheSync(stopCh)
 
+	routes.IndexRoute()
+	routes.FilterRoute(b)
 
-	http.HandleFunc("/", b.Index)
-	http.HandleFunc("/foo/filter", b.FooFilter)
 	s := &http.Server{
 		Addr: ":8080",
 	}
