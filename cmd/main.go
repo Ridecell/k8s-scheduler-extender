@@ -63,13 +63,12 @@ func main() {
 
 	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	b := cache.NewInformerCache(informerFactory, logger)
+	c := cache.NewInformerCache(informerFactory, logger)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
 	clientCache.WaitForCacheSync(stopCh)
 
-	routes.IndexRoute()
-	routes.FilterRoute(b)
+	routes.BaseHandler(c)
 
 	s := &http.Server{
 		Addr: ":8080",

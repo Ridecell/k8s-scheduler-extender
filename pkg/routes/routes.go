@@ -42,7 +42,7 @@ import (
 // 	}
 // }
 
-type Cache struct {
+type baseHandler struct {
 	podInformer      cache.SharedIndexInformer
 	replicaSetLister applister.ReplicaSetLister
 	log              logr.Logger
@@ -55,23 +55,22 @@ type PodData struct {
 	deploymentName string
 }
 
-func IndexRoute() {
-	http.HandleFunc("/index", Index)
-}
-func Index(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Welcome to k8s-scheduler-extender!\n")
-}
-
-func FilterRoute(ic *informerCache.Cache) {
-	c := &Cache{
+func BaseHandler(ic *informerCache.Cache) {
+	c := &baseHandler{
 		podInformer:      ic.PodInformer,
 		replicaSetLister: ic.ReplicaSetLister,
 		log:              ic.Log,
 		ttlCache:         ic.TTLCache,
 	}
+	http.HandleFunc("/index", Index)
 	http.HandleFunc("/foo/filter", c.FooFilter)
 }
-func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
+
+func Index(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "Welcome to k8s-scheduler-extender!\n")
+}
+
+func (c *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
 	var extenderArgs schedulerapi.ExtenderArgs
@@ -81,7 +80,7 @@ func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
 			Error: err.Error(),
 		}
 	} else {
-		extenderFilterResult = c.Handler(extenderArgs)
+		extenderFilterResult = c.FooFilterHandler(extenderArgs)
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
@@ -96,7 +95,7 @@ func (c *Cache) FooFilter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
+func (c *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 	pod := args.Pod
 	canSchedule := make([]v1.Node, 0, len(args.Nodes.Items))
 	canNotSchedule := make(map[string]string)
@@ -150,7 +149,7 @@ func (c *Cache) Handler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFi
 	return &result
 }
 
-func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
+func (c *baseHandler) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 	var maxPodsPerNode int
 	var data PodData
 	var replicasetName string
@@ -206,7 +205,7 @@ func (c *Cache) checkPod(pod *v1.Pod, log logr.Logger) (PodData, bool) {
 	return data, true
 }
 
-func (c *Cache) checkfitness(node v1.Node, pod *v1.Pod, podData PodData, log logr.Logger) (bool, string) {
+func (c *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData, log logr.Logger) (bool, string) {
 	var re *regexp.Regexp
 	podsSet := make(map[string]string)
 	podCount := 0
