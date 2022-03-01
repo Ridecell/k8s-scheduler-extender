@@ -36,9 +36,11 @@ func (c *Cache) GetPodInformer() cache.SharedIndexInformer {
 				log.Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
+			_ = c.TTLCache.Remove(pod.Spec.NodeName)
 			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
+	
 	//create indexer with index 'nodename'
 	err := podInformer.AddIndexers(map[string]cache.IndexFunc{
 		"nodename": func(obj interface{}) ([]string, error) {
@@ -50,5 +52,6 @@ func (c *Cache) GetPodInformer() cache.SharedIndexInformer {
 	if err != nil {
 		log.Error(err, "Informer error")
 	}
+
 	return podInformer
 }

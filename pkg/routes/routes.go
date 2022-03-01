@@ -16,31 +16,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	applister "k8s.io/client-go/listers/apps/v1"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
-	informerCache "ridecell-k8s-scheduler-extender/pkg/cache"
+	// informerCache "ridecell-k8s-scheduler-extender/pkg/cache"
+	podspernode "ridecell-k8s-scheduler-extender/pkg/routes/podspernode"
 )
-
-// func UpdateCache(podName string, nodeName string, log logr.Logger) {
-// 	val, err := ttlCache.Get(nodeName)
-// 	if err != nil && err != ttlcache.ErrNotFound {
-// 		log.Error(err, "ttl Cache Error")
-// 	}
-// 	if val != nil {
-// 		podNames := val.([]string)
-// 		for i, pod := range podNames {
-// 			if pod == podName {
-// 				podNames[i] = podNames[len(podNames)-1]
-// 				podNames = podNames[:len(podNames)-1]
-// 				err := ttlCache.Set(nodeName, podNames)
-// 				if err != nil {
-// 					log.Error(err, "Set cache error")
-// 					return
-// 				}
-// 				log.Info("ttl Cache Updated", "Deleted Pod", podName, "Node", nodeName)
-// 				return
-// 			}
-// 		}
-// 	}
-// }
 
 type baseHandler struct {
 	podInformer      cache.SharedIndexInformer
@@ -55,22 +33,25 @@ type PodData struct {
 	deploymentName string
 }
 
-func BaseHandler(ic *informerCache.Cache) {
-	b := &baseHandler{
-		podInformer:      ic.PodInformer,
-		replicaSetLister: ic.ReplicaSetLister,
-		log:              ic.Log,
-		ttlCache:         ic.TTLCache,
-	}
+func BaseHandler() {
 	http.HandleFunc("/index", Index)
-	http.HandleFunc("/foo/filter", b.FooFilter)
 }
 
 func Index(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Welcome to k8s-scheduler-extender!\n")
 }
 
-func (b *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
+func PodsPerNodeHandler(ic *podspernode.PodsPerNode) {
+	b := &baseHandler{
+		podInformer:      ic.PodInformer,
+		replicaSetLister: ic.ReplicaSetLister,
+		log:              ic.Log,
+		ttlCache:         ic.TTLCache,
+	}
+	http.HandleFunc("/podspernode/filter", b.PodsPerNodeFilter)
+}
+
+func (b *baseHandler) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
 	var extenderArgs schedulerapi.ExtenderArgs
@@ -81,7 +62,7 @@ func (b *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
 			Error: err.Error(),
 		}
 	} else {
-		extenderFilterResult = b.FooFilterHandler(extenderArgs)
+		extenderFilterResult = b.PodsPerNodeFilterHandler(extenderArgs)
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
@@ -96,7 +77,7 @@ func (b *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (b *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
+func (b *baseHandler) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 	pod := args.Pod
 	canSchedule := make([]v1.Node, 0, len(args.Nodes.Items))
 	canNotSchedule := make(map[string]string)
@@ -260,3 +241,7 @@ func (b *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData) (
 	}
 	return false, "Other error"
 }
+
+// tree->
+// /api/podpernode/ POST :-
+// folder podspernode
