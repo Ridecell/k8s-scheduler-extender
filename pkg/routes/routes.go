@@ -56,73 +56,72 @@ type PodData struct {
 }
 
 func BaseHandler(ic *informerCache.Cache) {
-	c := &baseHandler{
+	b := &baseHandler{
 		podInformer:      ic.PodInformer,
 		replicaSetLister: ic.ReplicaSetLister,
 		log:              ic.Log,
 		ttlCache:         ic.TTLCache,
 	}
 	http.HandleFunc("/index", Index)
-	http.HandleFunc("/foo/filter", c.FooFilter)
+	http.HandleFunc("/foo/filter", b.FooFilter)
 }
 
 func Index(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Welcome to k8s-scheduler-extender!\n")
 }
 
-func (c *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
+func (b *baseHandler) FooFilter(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
 	var extenderArgs schedulerapi.ExtenderArgs
 	var extenderFilterResult *schedulerapi.ExtenderFilterResult
-	
+
 	if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
 		extenderFilterResult = &schedulerapi.ExtenderFilterResult{
 			Error: err.Error(),
 		}
 	} else {
-		extenderFilterResult = c.FooFilterHandler(extenderArgs)
+		extenderFilterResult = b.FooFilterHandler(extenderArgs)
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
-		c.log.Error(err, "error in json marshal")
+		b.log.Error(err, "error in json marshal")
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write(response)
 		if err != nil {
-			c.log.Error(err, "error in writing response")
+			b.log.Error(err, "error in writing response")
 		}
 	}
 }
 
-func (c *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
+func (b *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 	pod := args.Pod
 	canSchedule := make([]v1.Node, 0, len(args.Nodes.Items))
 	canNotSchedule := make(map[string]string)
 	var podNames []string
 
-	c.log.Info("Request for Pod", "PodName", pod.Name)
-	c.log = c.log.WithName(pod.Name)
-
-	podData, valid := c.checkPod(pod)
+	b.log.Info("Request for Pod", "PodName", pod.Name)
+	log := b.log.WithName(pod.Name)
+	podData, valid := b.checkPod(pod)
 	if !valid {
 		result := schedulerapi.ExtenderFilterResult{
 			Nodes:       args.Nodes,
 			FailedNodes: canNotSchedule,
 			Error:       "",
 		}
-		c.log.Info("Pod not valid")
+		log.Info("Pod not valid")
 		return &result
 	}
 
 	for _, node := range args.Nodes.Items {
-		ok, msg := c.checkfitness(node, pod, podData)
+		ok, msg := b.checkfitness(node, pod, podData)
 		if ok {
-			c.log.Info("can be schedule on node", "NodeName", node.Name)
-			val, err := c.ttlCache.Get(node.Name)
+			log.Info("can be schedule on node", "NodeName", node.Name)
+			val, err := b.ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
-				c.log.Error(err, "ttl Cache Error")
+				log.Error(err, "ttl Cache Error")
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, pod.Name)
@@ -130,15 +129,15 @@ func (c *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedule
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
 			}
-			err = c.ttlCache.Set(node.Name, podNames)
+			err = b.ttlCache.Set(node.Name, podNames)
 			if err != nil {
-				c.log.Error(err, "Set ttl cache error")
+				log.Error(err, "Set ttl cache error")
 			}
-			c.log.Info("Pod added in ttlCache", "PodName", pod.Name)
+			log.Info("Pod added in ttlCache", "PodName", pod.Name)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
-			c.log.Info("Cannot schedule on node", "NodeName", node.Name, "Reason", msg)
+			log.Info("Cannot schedule on node", "NodeName", node.Name, "Reason", msg)
 			canNotSchedule[node.Name] = msg
 		}
 	}
@@ -153,31 +152,31 @@ func (c *baseHandler) FooFilterHandler(args schedulerapi.ExtenderArgs) *schedule
 	return &result
 }
 
-func (c *baseHandler) checkPod(pod *v1.Pod) (PodData, bool) {
+func (b *baseHandler) checkPod(pod *v1.Pod) (PodData, bool) {
 	var maxPodsPerNode int
 	var data PodData
 	var replicasetName string
 	var deploymentName string
 	var valid bool = false
-
+	log := b.log.WithName(pod.Name)
 	//check if pod is of replicaSet
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
-			c.log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
+			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
 			replicasetName = owner.Name
 			valid = true
 			break
 		}
 	}
 	if !valid {
-		c.log.Info("Pod is not of ReplicaSet")
+		log.Info("Pod is not of ReplicaSet")
 		return data, false
 	}
 
 	//get replicaset
-	replicaSet, err := c.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
+	replicaSet, err := b.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
 	if err != nil {
-		c.log.Error(err, "Error getting replicaset from store")
+		log.Error(err, "Error getting replicaset from store")
 		return data, false
 	}
 	if podsPerNode, ok := replicaSet.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; ok {
@@ -193,32 +192,34 @@ func (c *baseHandler) checkPod(pod *v1.Pod) (PodData, bool) {
 	//check if pod is of deployment
 	for _, owner := range replicaSet.OwnerReferences {
 		if owner.Kind == "Deployment" {
-			c.log.Info("Deployment Name:", "DeploymentName", owner.Name)
+			log.Info("Deployment Name:", "DeploymentName", owner.Name)
 			deploymentName = owner.Name
 			valid = true
 			break
 		}
 	}
 	if !valid {
-		c.log.Info("Pod is not of Deployment")
+		log.Info("Pod is not of Deployment")
 		return data, false
 	}
 
 	data.replicaCount = *replicaSet.Spec.Replicas
 	data.maxPodsPerNode = maxPodsPerNode
 	data.deploymentName = deploymentName
-	c.log.Info("Deployment info", "MaxPods", maxPodsPerNode, "Replicacount", data.replicaCount)
+	log.Info("Deployment info", "MaxPods", maxPodsPerNode, "Replicacount", data.replicaCount)
 
 	return data, true
 }
 
-func (c *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData) (bool, string) {
+func (b *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData) (bool, string) {
 	var re *regexp.Regexp
 	podsSet := make(map[string]string)
 	podCount := 0
 
+	log := b.log.WithName(pod.Name)
+
 	re, _ = regexp.Compile(podData.deploymentName + "-(.*)")
-	pods, err := c.podInformer.GetIndexer().ByIndex("nodename", node.Name)
+	pods, err := b.podInformer.GetIndexer().ByIndex("nodename", node.Name)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -227,9 +228,9 @@ func (c *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData) (
 		podsSet[pod.(*v1.Pod).Name] = pod.(*v1.Pod).Name
 	}
 
-	val, err := c.ttlCache.Get(node.Name)
+	val, err := b.ttlCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
-		c.log.Error(err, "Failed to create ttl cache")
+		log.Error(err, "Failed to create ttl cache")
 	}
 
 	if val != nil {
@@ -245,13 +246,13 @@ func (c *baseHandler) checkfitness(node v1.Node, pod *v1.Pod, podData PodData) (
 	}
 
 	if podData.replicaCount <= 3 {
-		c.log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
+		log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
 		if podCount == 0 {
 			return true, ""
 		}
 		return false, "Cannot schedule: Pod of deployment already exist."
 	} else if podData.replicaCount > 3 {
-		c.log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
+		log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
 		if podData.maxPodsPerNode > podCount {
 			return true, ""
 		}
