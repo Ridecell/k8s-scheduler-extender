@@ -6,6 +6,7 @@ import (
 )
 func (c *Cache) GetPodInformer() cache.SharedIndexInformer {
 	// watch events
+	c.Log=c.Log.WithName("Pod Informer")
 	podInformer := c.informerFactory.Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {

@@ -8,6 +8,7 @@ import (
 )
 
 func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
+	c.Log=c.Log.WithName("ReplicaSet Informer")
 	replicaSetInformer := c.informerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
