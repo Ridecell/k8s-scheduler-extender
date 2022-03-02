@@ -13,14 +13,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type PodsPerNode struct {
-	Log              logr.Logger
-	InformerFactory  informers.SharedInformerFactory
-}
-
 // Initializes informerFactory and logger
-func NewPodsPerNodeCache(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *PodsPerNode) {
-	c = &PodsPerNode{
+func NewPodsPerNodeCache(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *Cache) {
+	c = &Cache{
 		Log:             logger,
 		InformerFactory: informerFactory,
 	}
@@ -28,7 +23,7 @@ func NewPodsPerNodeCache(informerFactory informers.SharedInformerFactory, logger
 }
 
 // Creates a PodInformer and indexer, watches events and returns informer
-func (ppn *PodsPerNode) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
+func (ppn *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
 	// watch events
 	log := ppn.Log.WithName("Pod Informer")
 	podInformer := ppn.InformerFactory.Core().V1().Pods().Informer()
@@ -80,7 +75,7 @@ func (ppn *PodsPerNode) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedInd
 }
 
 // Creates a ReplicaSet informer, watches event and returns a Replicaset lister
-func (ppn *PodsPerNode) GetReplicaSetLister() v1.ReplicaSetLister {
+func (ppn *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 	log := ppn.Log.WithName("ReplicaSet Informer")
 	replicaSetInformer := ppn.InformerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -119,7 +114,7 @@ func (ppn *PodsPerNode) GetReplicaSetLister() v1.ReplicaSetLister {
 }
 
 // initializes ttl cache
-func (ppn *PodsPerNode) GetTTLCache() *ttlcache.Cache {
+func (ppn *Cache) GetTTLCache() *ttlcache.Cache {
 	log := ppn.Log.WithName("ttl Cache")
 	ttlCache := ttlcache.NewCache()
 	// it takes 1-2 seconds to schedule a pod on a node, so the indexer doesn’t get updated immediately so need to maintain a temporary cache  for a minute

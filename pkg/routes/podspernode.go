@@ -34,13 +34,13 @@ type PodData struct {
 }
 
 // Initializes informers and ttl cache
-func NewPodsPerNode(informerFactort informers.SharedInformerFactory, logger logr.Logger) (b *PodsPerNode) {
-	c := cache.NewPodsPerNodeCache(informerFactort, logger)
+func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr.Logger) (b *PodsPerNode) {
+	c := cache.NewPodsPerNodeCache(informerFactory, logger)
 	b = &PodsPerNode{}
-	b.log = c.Log
 	b.replicaSetLister = c.GetReplicaSetLister()
 	b.ttlCache = c.GetTTLCache()
 	b.podInformer = c.GetPodInformer(b.ttlCache)
+	b.log = logger
 	return b
 }
 
