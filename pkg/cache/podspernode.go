@@ -31,32 +31,32 @@ func (ppn *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInfo
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)
 			if !ok {
-				log.Info("cannot convert to *v1.Pod:", new)
+				log.V(1).Info("cannot convert to *v1.Pod:", new)
 				return
 			}
-			log.Info("Added", "Pod:", pod.Name)
+			log.V(1).Info("Added", "Pod:", pod.Name)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				log.Info("cannot convert oldObj to", "*v1.Pod:", old)
+				log.V(1).Info("cannot convert oldObj to", "*v1.Pod:", old)
 				return
 			}
 			_, ok = new.(*corev1.Pod)
 			if !ok {
-				log.Info("cannot convert newObj to", "*v1.Pod:", new)
+				log.V(1).Info("cannot convert newObj to", "*v1.Pod:", new)
 				return
 			}
-			log.Info("Updated", "Pod:", pod.Name, "NodeName", pod.Spec.NodeName)
+			log.V(1).Info("Updated", "Pod:", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 		DeleteFunc: func(old interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				log.Info("cannot convert to", "*v1.Pod:", old)
+				log.V(1).Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
 			_ = ttlCache.Remove(pod.Spec.NodeName)
-			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
+			log.V(1).Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
 	//create indexer with index 'nodename'
@@ -82,31 +82,31 @@ func (ppn *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 		AddFunc: func(new interface{}) {
 			replicaSet, ok := new.(*appsv1.ReplicaSet)
 			if !ok {
-				log.Info("cannot convert to", "*appsv1.ReplicaSet:", new)
+				log.V(1).Info("cannot convert to", "*appsv1.ReplicaSet:", new)
 				return
 			}
-			log.Info("Added", "ReplicaSet:", replicaSet.Name)
+			log.V(1).Info("Added", "ReplicaSet:", replicaSet.Name)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				log.Info("cannot convert oldObj to", "*appsv1.replicaSet:", old)
+				log.V(1).Info("cannot convert oldObj to", "*appsv1.replicaSet:", old)
 				return
 			}
 			_, ok = new.(*appsv1.ReplicaSet)
 			if !ok {
-				log.Info("cannot convert newObj to", "*appsv1.replicaSet:", new)
+				log.V(1).Info("cannot convert newObj to", "*appsv1.replicaSet:", new)
 				return
 			}
-			log.Info("Updated", "Replicaset:", replicaSet.Name)
+			log.V(1).Info("Updated", "Replicaset:", replicaSet.Name)
 		},
 		DeleteFunc: func(old interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				log.Info("cannot convert to", "*appsv1.replicaSet:", old)
+				log.V(1).Info("cannot convert to", "*appsv1.replicaSet:", old)
 				return
 			}
-			log.Info("Deleted", "ReplicaSet:", replicaSet.Name)
+			log.V(1).Info("Deleted", "ReplicaSet:", replicaSet.Name)
 		},
 	})
 	replicaSetLister := ppn.InformerFactory.Apps().V1().ReplicaSets().Lister()
