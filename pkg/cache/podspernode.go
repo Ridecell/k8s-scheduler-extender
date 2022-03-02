@@ -14,28 +14,24 @@ import (
 )
 
 type PodsPerNode struct {
-	PodInformer      cache.SharedIndexInformer
-	ReplicaSetLister v1.ReplicaSetLister
 	Log              logr.Logger
-	TTLCache         *ttlcache.Cache
 	InformerFactory  informers.SharedInformerFactory
 }
 
-func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *PodsPerNode) {
+// Initializes informerFactory and logger
+func NewPodsPerNodeCache(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *PodsPerNode) {
 	c = &PodsPerNode{
 		Log:             logger,
 		InformerFactory: informerFactory,
 	}
-	c.PodInformer = c.GetPodInformer()
-	c.ReplicaSetLister = c.GetReplicaSetLister()
-	c.TTLCache = c.getttlCache()
 	return c
 }
 
-func (c *PodsPerNode) GetPodInformer() cache.SharedIndexInformer {
+// Creates a PodInformer and indexer, watches events and returns informer
+func (ppn *PodsPerNode) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
 	// watch events
-	log := c.Log.WithName("Pod Informer")
-	podInformer := c.InformerFactory.Core().V1().Pods().Informer()
+	log := ppn.Log.WithName("Pod Informer")
+	podInformer := ppn.InformerFactory.Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)
@@ -64,7 +60,7 @@ func (c *PodsPerNode) GetPodInformer() cache.SharedIndexInformer {
 				log.Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
-			_ = c.TTLCache.Remove(pod.Spec.NodeName)
+			_ = ttlCache.Remove(pod.Spec.NodeName)
 			log.Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
@@ -83,9 +79,10 @@ func (c *PodsPerNode) GetPodInformer() cache.SharedIndexInformer {
 	return podInformer
 }
 
-func (c *PodsPerNode) GetReplicaSetLister() v1.ReplicaSetLister {
-	log := c.Log.WithName("ReplicaSet Informer")
-	replicaSetInformer := c.InformerFactory.Apps().V1().ReplicaSets().Informer()
+// Creates a ReplicaSet informer, watches event and returns a Replicaset lister
+func (ppn *PodsPerNode) GetReplicaSetLister() v1.ReplicaSetLister {
+	log := ppn.Log.WithName("ReplicaSet Informer")
+	replicaSetInformer := ppn.InformerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			replicaSet, ok := new.(*appsv1.ReplicaSet)
@@ -117,12 +114,13 @@ func (c *PodsPerNode) GetReplicaSetLister() v1.ReplicaSetLister {
 			log.Info("Deleted", "ReplicaSet:", replicaSet.Name)
 		},
 	})
-	replicaSetLister := c.InformerFactory.Apps().V1().ReplicaSets().Lister()
+	replicaSetLister := ppn.InformerFactory.Apps().V1().ReplicaSets().Lister()
 	return replicaSetLister
 }
 
-func (c *PodsPerNode) getttlCache() *ttlcache.Cache {
-	log := c.Log.WithName("ttl Cache")
+// initializes ttl cache
+func (ppn *PodsPerNode) GetTTLCache() *ttlcache.Cache {
+	log := ppn.Log.WithName("ttl Cache")
 	ttlCache := ttlcache.NewCache()
 	// it takes 1-2 seconds to schedule a pod on a node, so the indexer doesn’t get updated immediately so need to maintain a temporary cache  for a minute
 	err := ttlCache.SetTTL(time.Duration(1 * time.Minute))

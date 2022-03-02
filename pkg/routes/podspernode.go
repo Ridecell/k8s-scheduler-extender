@@ -3,21 +3,21 @@ package routes
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/ReneKroon/ttlcache/v2"
-	"github.com/go-logr/logr"
+	"fmt"
 	"io"
-	"k8s.io/client-go/informers"
 	"net/http"
 	"regexp"
 	"ridecell-k8s-scheduler-extender/pkg/cache"
 	"strconv"
 
+	"github.com/ReneKroon/ttlcache/v2"
+	"github.com/go-logr/logr"
+	"k8s.io/client-go/informers"
+
 	corev1 "k8s.io/api/core/v1"
 	applister "k8s.io/client-go/listers/apps/v1"
 	goClinetCache "k8s.io/client-go/tools/cache"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
-	// informerCache "ridecell-k8s-scheduler-extender/pkg/cache"
-	// PodsPerNode "ridecell-k8s-scheduler-extender/pkg/routes/podspernode"
 )
 
 type PodsPerNode struct {
@@ -33,23 +33,19 @@ type PodData struct {
 	deploymentName string
 }
 
-type Component struct {
-	InformerFactory informers.SharedInformerFactory
-	Log             logr.Logger
-}
-
+// Initializes informers and ttl cache
 func NewPodsPerNode(informerFactort informers.SharedInformerFactory, logger logr.Logger) (b *PodsPerNode) {
-	c := cache.NewPodsPerNode(informerFactort, logger)
-	b = &PodsPerNode{
-		podInformer:      c.PodInformer,
-		replicaSetLister: c.ReplicaSetLister,
-		log:              c.Log,
-		ttlCache:         c.TTLCache,
-	}
+	c := cache.NewPodsPerNodeCache(informerFactort, logger)
+	b = &PodsPerNode{}
+	b.log = c.Log
+	b.replicaSetLister = c.GetReplicaSetLister()
+	b.ttlCache = c.GetTTLCache()
+	b.podInformer = c.GetPodInformer(b.ttlCache)
 	return b
 }
 
-func (b *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) {
+// Handles POST request received at '/podspernode/filter'
+func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	if r.Method != "POST" {
 		return
@@ -59,49 +55,58 @@ func (b *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) 
 	var extenderFilterResult *schedulerapi.ExtenderFilterResult
 
 	if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
+		ppn.log.Error(err, "error in json decode")
 		extenderFilterResult = &schedulerapi.ExtenderFilterResult{
-			Error: err.Error(),
+			Nodes:       nil,
+			FailedNodes: nil,
+			Error:       err.Error(),
 		}
 	} else {
-		extenderFilterResult = b.PodsPerNodeFilterHandler(extenderArgs)
+		extenderFilterResult = ppn.PodsPerNodeFilterHandler(extenderArgs)
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
-		b.log.Error(err, "error in json marshal")
+		ppn.log.Error(err, "Error in json marshal")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
+		w.Write([]byte(errMsg))
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		if len(extenderFilterResult.Error)>0{
+           w.WriteHeader(http.StatusInternalServerError)
+		}
 		_, err := w.Write(response)
 		if err != nil {
-			b.log.Error(err, "error in writing response")
+			ppn.log.Error(err, "Error in writing response")
 		}
 	}
 }
 
-func (p *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
+// It checks if pod is of deployment set and returns nodes on which it can be scheduled.
+func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 	pod := args.Pod
 	canSchedule := make([]corev1.Node, 0, len(args.Nodes.Items))
-	canNotSchedule := make(map[string]string)
 	var podNames []string
 
-	p.log.Info("Request for Pod", "PodName", pod.Name)
-	log := p.log.WithName(pod.Name)
-	podData, valid := p.checkPod(pod)
+	ppn.log.Info("Request for Pod", "PodName", pod.Name)
+	log := ppn.log.WithName(pod.Name)
+	podData, valid := ppn.checkPodDeployment(pod)
 	if !valid {
 		result := schedulerapi.ExtenderFilterResult{
-			Nodes:       args.Nodes,
-			FailedNodes: canNotSchedule,
-			Error:       "",
+			Nodes: args.Nodes,
+			Error: "",
 		}
-		log.Info("Pod not valid")
+		log.Info("Pod is not of deployment")
 		return &result
 	}
 
 	for _, node := range args.Nodes.Items {
-		ok, msg := p.checkfitness(node, pod, podData)
+		ok, msg := ppn.checkfitness(node, pod, podData)
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
-			val, err := p.ttlCache.Get(node.Name)
+			val, err := ppn.ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
 				log.Error(err, "ttl Cache Error")
 			}
@@ -111,7 +116,7 @@ func (p *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *
 				podNames = val.([]string)
 				podNames = append(podNames, pod.Name)
 			}
-			err = p.ttlCache.Set(node.Name, podNames)
+			err = ppn.ttlCache.Set(node.Name, podNames)
 			if err != nil {
 				log.Error(err, "Set ttl cache error")
 			}
@@ -120,7 +125,6 @@ func (p *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *
 			break
 		} else {
 			log.Info("Cannot schedule on node", "NodeName", node.Name, "Reason", msg)
-			canNotSchedule[node.Name] = msg
 		}
 	}
 
@@ -128,19 +132,20 @@ func (p *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *
 		Nodes: &corev1.NodeList{
 			Items: canSchedule,
 		},
-		FailedNodes: canNotSchedule,
-		Error:       "",
+		Error: "",
 	}
 	return &result
 }
 
-func (p *PodsPerNode) checkPod(pod *corev1.Pod) (PodData, bool) {
+// checks if pods is of deployment set and returns pod data (replicaset name, deployment name)
+func (ppn *PodsPerNode) checkPodDeployment(pod *corev1.Pod) (PodData, bool) {
+
 	var maxPodsPerNode int
 	var data PodData
 	var replicasetName string
 	var deploymentName string
 	var valid bool = false
-	log := p.log.WithName(pod.Name)
+	log := ppn.log.WithName(pod.Name)
 	//check if pod is of replicaSet
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
@@ -156,7 +161,7 @@ func (p *PodsPerNode) checkPod(pod *corev1.Pod) (PodData, bool) {
 	}
 
 	//get replicaset
-	replicaSet, err := p.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
+	replicaSet, err := ppn.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
 	if err != nil {
 		log.Error(err, "Error getting replicaset from store")
 		return data, false
@@ -193,15 +198,16 @@ func (p *PodsPerNode) checkPod(pod *corev1.Pod) (PodData, bool) {
 	return data, true
 }
 
-func (p *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData PodData) (bool, string) {
+//It checks if node is valid for pod to schedule
+func (ppn *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData PodData) (bool, string) {
 	var re *regexp.Regexp
 	podsSet := make(map[string]string)
 	podCount := 0
 
-	log := p.log.WithName(pod.Name)
+	log := ppn.log.WithName(pod.Name)
 
 	re, _ = regexp.Compile(podData.deploymentName + "-(.*)")
-	pods, err := p.podInformer.GetIndexer().ByIndex("nodename", node.Name)
+	pods, err := ppn.podInformer.GetIndexer().ByIndex("nodename", node.Name)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -210,7 +216,7 @@ func (p *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData Po
 		podsSet[pod.(*corev1.Pod).Name] = pod.(*corev1.Pod).Name
 	}
 
-	val, err := p.ttlCache.Get(node.Name)
+	val, err := ppn.ttlCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
 		log.Error(err, "Failed to create ttl cache")
 	}
@@ -242,8 +248,3 @@ func (p *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData Po
 	}
 	return false, "Other error"
 }
-
-// tree->
-// /api/podpernode/ POST :-
-// folder podspernode
-// root.go -
