@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"ridecell-k8s-scheduler-extender/pkg/routes"
-	// "ridecell-k8s-scheduler-extender/pkg/cache"
 	"time"
 
+	"github.com/Ridecell/k8s-scheduler-extender/pkg/routes"
 	"github.com/go-logr/logr"
 	"go.uber.org/zap/zapcore"
 	"k8s.io/client-go/informers"
@@ -16,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	kubernetes "k8s.io/client-go/kubernetes"
-	clientcmd "k8s.io/client-go/tools/clientcmd"
 	goClinetCache "k8s.io/client-go/tools/cache"
+	clientcmd "k8s.io/client-go/tools/clientcmd"
 )
 
 var logger logr.Logger
@@ -50,7 +49,7 @@ func createLogger() logr.Logger {
 	opts := zap.Options{
 		Development: true,
 		TimeEncoder: zapcore.RFC3339TimeEncoder,
-		Level: zapcore.DebugLevel,
+		Level:       zapcore.DebugLevel,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -68,13 +67,13 @@ func main() {
 
 	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-    p := routes.NewPodsPerNode(informerFactory,logger)
+	p := routes.NewPodsPerNode(informerFactory, logger)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
 	goClinetCache.WaitForCacheSync(stopCh)
 
 	http.HandleFunc("/index", routes.Index)
-    http.HandleFunc("/podspernode/filter",p.PodsPerNodeFilter)
+	http.HandleFunc("/podspernode/filter", p.PodsPerNodeFilter)
 	s := &http.Server{
 		Addr: ":8080",
 	}

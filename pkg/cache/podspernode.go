@@ -4,29 +4,18 @@ import (
 	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
-	"github.com/go-logr/logr"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/listers/apps/v1"
 	"k8s.io/client-go/tools/cache"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/client-go/listers/apps/v1"
 )
 
-// Initializes informerFactory and logger
-func NewPodsPerNodeCache(informerFactory informers.SharedInformerFactory, logger logr.Logger) (c *Cache) {
-	c = &Cache{
-		Log:             logger,
-		InformerFactory: informerFactory,
-	}
-	return c
-}
-
 // Creates a PodInformer and indexer, watches events and returns informer
-func (ppn *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
+func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
 	// watch events
-	log := ppn.Log.WithName("Pod Informer")
-	podInformer := ppn.InformerFactory.Core().V1().Pods().Informer()
+	log := c.Log.WithName("Pod Informer")
+	podInformer := c.InformerFactory.Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)

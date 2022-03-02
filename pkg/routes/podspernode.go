@@ -7,49 +7,56 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"ridecell-k8s-scheduler-extender/pkg/cache"
 	"strconv"
 
 	"github.com/ReneKroon/ttlcache/v2"
+	"github.com/Ridecell/k8s-scheduler-extender/pkg/cache"
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/informers"
 
 	corev1 "k8s.io/api/core/v1"
 	applister "k8s.io/client-go/listers/apps/v1"
-	goClinetCache "k8s.io/client-go/tools/cache"
+	k8scache "k8s.io/client-go/tools/cache"
 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
 )
 
+const (
+	defaultMaxPodsPerNode = 1
+	defaultMinPodsPerNode     = 3
+)
+
 type PodsPerNode struct {
-	podInformer      goClinetCache.SharedIndexInformer
+	podInformer      k8scache.SharedIndexInformer
 	replicaSetLister applister.ReplicaSetLister
 	log              logr.Logger
 	ttlCache         *ttlcache.Cache
 }
 
 type PodData struct {
-	replicaCount   int32
+	replica        int32
 	maxPodsPerNode int
 	deploymentName string
 }
 
 // Initializes informers and ttl cache
 func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr.Logger) (b *PodsPerNode) {
-	c := cache.NewPodsPerNodeCache(informerFactory, logger)
+	c := cache.Cache{
+		Log:             logger,
+		InformerFactory: informerFactory,
+	}
 	b = &PodsPerNode{}
 	b.replicaSetLister = c.GetReplicaSetLister()
 	b.ttlCache = c.GetTTLCache()
 	b.podInformer = c.GetPodInformer(b.ttlCache)
-	b.log = logger
 	return b
 }
 
 // Handles POST request received at '/podspernode/filter'
 func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) {
-	var buf bytes.Buffer
 	if r.Method != "POST" {
 		return
 	}
+	var buf bytes.Buffer
 	body := io.TeeReader(r.Body, &buf)
 	var extenderArgs schedulerapi.ExtenderArgs
 	var extenderFilterResult *schedulerapi.ExtenderFilterResult
@@ -74,8 +81,8 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if len(extenderFilterResult.Error)>0{
-           w.WriteHeader(http.StatusInternalServerError)
+		if len(extenderFilterResult.Error) > 0 {
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 		_, err := w.Write(response)
 		if err != nil {
@@ -86,14 +93,13 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 
 // It checks if pod is of deployment set and returns nodes on which it can be scheduled.
 func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
-	pod := args.Pod
-	canSchedule := make([]corev1.Node, 0, len(args.Nodes.Items))
-	var podNames []string
 
-	ppn.log.Info("Request for Pod", "PodName", pod.Name)
-	log := ppn.log.WithName(pod.Name)
-	podData, valid := ppn.checkPodDeployment(pod)
-	if !valid {
+	var canSchedule []corev1.Node
+
+	ppn.log.Info("Request for Pod", "PodName", args.Pod.Name)
+	log := ppn.log.WithName(args.Pod.Name)
+	podData, yes := ppn.isOwnerDeployment(args.Pod)
+	if !yes {
 		result := schedulerapi.ExtenderFilterResult{
 			Nodes: args.Nodes,
 			Error: "",
@@ -101,9 +107,9 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 		log.Info("Pod is not of deployment")
 		return &result
 	}
-
+	var podNames []string
 	for _, node := range args.Nodes.Items {
-		ok, msg := ppn.checkfitness(node, pod, podData)
+		ok, msg := ppn.checkfitness(node, args.Pod, podData)
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
 			val, err := ppn.ttlCache.Get(node.Name)
@@ -111,10 +117,10 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 				log.Error(err, "ttl Cache Error")
 			}
 			if err == ttlcache.ErrNotFound {
-				podNames = append(podNames, pod.Name)
+				podNames = append(podNames, args.Pod.Name)
 			} else {
 				podNames = val.([]string)
-				podNames = append(podNames, pod.Name)
+				podNames = append(podNames, args.Pod.Name)
 			}
 			err = ppn.ttlCache.Set(node.Name, podNames)
 			if err != nil {
@@ -137,26 +143,23 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 	return &result
 }
 
-// checks if pods is of deployment set and returns pod data (replicaset name, deployment name)
-func (ppn *PodsPerNode) checkPodDeployment(pod *corev1.Pod) (PodData, bool) {
-
-	var maxPodsPerNode int
-	var data PodData
-	var replicasetName string
-	var deploymentName string
-	var valid bool = false
+// checks if pods have owner type deployment set and returns pod data (replicaset name, deployment name)
+func (ppn *PodsPerNode) isOwnerDeployment(pod *corev1.Pod) (PodData, bool) {
+	data := PodData{}
+	isDeployment := false
+	replicasetName := ""
 	log := ppn.log.WithName(pod.Name)
-	//check if pod is of replicaSet
+	// Get replica name
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
 			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
 			replicasetName = owner.Name
-			valid = true
+			isDeployment = true
 			break
 		}
 	}
-	if !valid {
-		log.Info("Pod is not of ReplicaSet")
+	if !isDeployment {
+		log.Info("Pod do not have owner type ReplicaSet")
 		return data, false
 	}
 
@@ -166,11 +169,12 @@ func (ppn *PodsPerNode) checkPodDeployment(pod *corev1.Pod) (PodData, bool) {
 		log.Error(err, "Error getting replicaset from store")
 		return data, false
 	}
+
 	if podsPerNode, ok := replicaSet.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; ok {
 		if podsPerNode != "" {
-			maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
+			data.maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
 		} else {
-			maxPodsPerNode = 2
+			data.maxPodsPerNode = defaultMaxPodsPerNode
 		}
 	} else {
 		return data, false
@@ -190,61 +194,60 @@ func (ppn *PodsPerNode) checkPodDeployment(pod *corev1.Pod) (PodData, bool) {
 		return data, false
 	}
 
-	data.replicaCount = *replicaSet.Spec.Replicas
+	data.replica = *replicaSet.Spec.Replicas
 	data.maxPodsPerNode = maxPodsPerNode
 	data.deploymentName = deploymentName
-	log.Info("Deployment info", "MaxPods", maxPodsPerNode, "Replicacount", data.replicaCount)
+	log.Info("Deployment info", "MaxPods", maxPodsPerNode, "Replicacount", data.replica)
 
 	return data, true
 }
 
 //It checks if node is valid for pod to schedule
 func (ppn *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData PodData) (bool, string) {
-	var re *regexp.Regexp
-	podsSet := make(map[string]string)
-	podCount := 0
-
 	log := ppn.log.WithName(pod.Name)
-
-	re, _ = regexp.Compile(podData.deploymentName + "-(.*)")
-	pods, err := ppn.podInformer.GetIndexer().ByIndex("nodename", node.Name)
+	podsOnNode, err := ppn.podInformer.GetIndexer().ByIndex("nodename", node.Name)
 	if err != nil {
 		return false, err.Error()
 	}
-	// create set of pod names using both ttl cache and informer cache
-	for _, pod := range pods {
-		podsSet[pod.(*corev1.Pod).Name] = pod.(*corev1.Pod).Name
+
+	// create map of pod names using both ttl cache and informer cache. Here value key does not matter in map.
+	// bcz We are uisng map as set here.
+	podsSet := make(map[string]bool)
+	for _, pod := range podsOnNode {
+		podsSet[pod.(*corev1.Pod).Name] = true
+
 	}
 
-	val, err := ppn.ttlCache.Get(node.Name)
+	ttlPods, err := ppn.ttlCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
-		log.Error(err, "Failed to create ttl cache")
+		log.Error(err, "Failed get node from ttlcache")
 	}
 
-	if val != nil {
-		for _, podName := range val.([]string) {
-			podsSet[podName] = podName
+	if ttlPods != nil {
+		for _, podName := range ttlPods.([]string) {
+			podsSet[podName] = true
 		}
 	}
 
-	for _, pod := range podsSet {
+	podCount := 0
+	var re *regexp.Regexp
+	re, _ = regexp.Compile(podData.deploymentName + "-(.*)")
+	for pod, _ := range podsSet {
 		if re.MatchString(pod) {
 			podCount++
 		}
 	}
 
-	if podData.replicaCount <= 3 {
-		log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
+	log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
+	if podData.replica <= defaultMinPodsPerNode {
 		if podCount == 0 {
 			return true, ""
 		}
 		return false, "Cannot schedule: Pod of deployment already exist."
-	} else if podData.replicaCount > 3 {
-		log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount)
-		if podData.maxPodsPerNode > podCount {
-			return true, ""
-		}
-		return false, "Cannot schedule: Maximum number of pods already running."
 	}
-	return false, "Other error"
+	if podData.maxPodsPerNode > podCount {
+		return true, ""
+	}
+	return false, "Cannot schedule: Maximum number of pods already running."
+
 }

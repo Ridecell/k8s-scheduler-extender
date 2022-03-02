@@ -1,4 +1,4 @@
-module ridecell-k8s-scheduler-extender
+module github.com/Ridecell/k8s-scheduler-extender
 
 go 1.17
 
