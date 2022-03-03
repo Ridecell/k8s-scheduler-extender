@@ -115,7 +115,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 
 	ppn.log.Info("Request for Pod", "PodName", args.Pod.Name)
 	log := ppn.log.WithName(args.Pod.Name)
-	podData, yes := ppn.isOwnerDeployment(args.Pod)
+	podData, yes := ppn.isSchedulable(args.Pod)
 	if !yes {
 		result := schedulerapi.ExtenderFilterResult{
 			Nodes: args.Nodes,
@@ -126,7 +126,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 	}
 	var podNames []string
 	for _, node := range args.Nodes.Items {
-		msg, ok := ppn.checkfitness(node, args.Pod, podData)
+		msg, ok := ppn.canFit(node, args.Pod, podData)
 		if ok {
 			log.Info("can be schedule on node", "NodeName", node.Name)
 			val, err := ppn.ttlCache.Get(node.Name)
@@ -161,7 +161,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 }
 
 // checks if pods have owner type deployment set and returns pod data (replicaset name, deployment name)
-func (ppn *PodsPerNode) isOwnerDeployment(pod *corev1.Pod) (PodData, bool) {
+func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	data := PodData{}
 	isDeployment := false
 	replicasetName := ""
@@ -208,7 +208,7 @@ func (ppn *PodsPerNode) isOwnerDeployment(pod *corev1.Pod) (PodData, bool) {
 }
 
 //It checks if node is valid for pod to schedule
-func (ppn *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData PodData) (string, bool) {
+func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodData) (string, bool) {
 	log := ppn.log.WithName(pod.Name)
 	podsOnNode, err := ppn.podInformer.GetIndexer().ByIndex("nodename", node.Name)
 	if err != nil {
@@ -243,18 +243,18 @@ func (ppn *PodsPerNode) checkfitness(node corev1.Node, pod *corev1.Pod, podData 
 		}
 	}
 
-	log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount, "replica Count",podData.replica,"maxPods:")
-	// if replica count - defaultmaxpodspernode <= defaultMinPodsPerNode then pods should be schedule as one pod per node
+	log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount, "replica Count",podData.replica,"maxPods",podData.maxPodsPerNode)
+	// if replica count - defaultmaxpodspernode >= defaultMinPodsPerNode then pods should be schedule as one pod per node
 	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
 	if podData.replica <= defaultMinPodsPerNode || defaultMinPodsPerNode >= (podData.replica-defaultMaxPodsPerNode) {
 		if podCount == 0 {
 			return "", true
 		}
-		return "Cannot schedule: Pod of deployment already exist.", false
+		return "Cannot schedule: Already running default minimum pods: "+strconv.Itoa(defaultMinPodsPerNode), false
 	}
 
 	if podData.maxPodsPerNode > podCount {
 		return "", true
 	}
-	return "Cannot schedule: Maximum number of pods already running.", false
+	return "Cannot schedule:Already running maximum number of pods:"+strconv.Itoa(podData.maxPodsPerNode), false
 }

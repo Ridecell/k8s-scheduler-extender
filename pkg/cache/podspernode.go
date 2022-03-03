@@ -42,7 +42,7 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 				log.V(1).Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
-			_ = ttlCache.Remove(pod.Spec.NodeName)
+			c.updatettlCache(pod,ttlCache)
 			log.V(1).Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
@@ -59,6 +59,26 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 	}
 
 	return podInformer
+}
+
+func  (ppn *Cache)updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
+	log:=ppn.Log.WithName("ttlCache")
+	val, err := ttlCache.Get(pod.Spec.NodeName)
+	if err != nil && err != ttlcache.ErrNotFound {
+		log.Error(err, "ttlCache Error")
+	}
+	if val != nil {
+		podNames := val.([]string)
+		for i, podName := range podNames {
+			if pod.Name == podName {
+				podNames[i] = podNames[len(podNames)-1]
+				podNames = podNames[:len(podNames)-1]
+				ttlCache.Set(pod.Spec.NodeName, podNames)
+				log.Info("ttlCache Updated", "Deleted Pod", podName)
+				break
+			}
+		}
+	}
 }
 
 // Creates a ReplicaSet informer, watches event and returns a Replicaset lister
