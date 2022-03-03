@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ReneKroon/ttlcache/v2"
@@ -38,7 +37,7 @@ type PodsPerNode struct {
 type PodData struct {
 	replica        int32
 	maxPodsPerNode int
-	deploymentName string
+	replicaSetName string
 }
 
 // Initializes ttl cache
@@ -108,7 +107,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// It checks if pod is of deployment set and returns nodes on which it can be scheduled.
+// It checks if pod is of ReplicaSet set and returns nodes on which it can be scheduled.
 func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 
 	var canSchedule []corev1.Node
@@ -121,7 +120,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 			Nodes: args.Nodes,
 			Error: "",
 		}
-		log.Info("Pod is not of deployment")
+		log.Info("Skipping Pod, annotation not present or its owner type is not a replicaset")
 		return &result
 	}
 	var podNames []string
@@ -160,11 +159,11 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 	return &result
 }
 
-// checks if pods have owner type deployment set and returns pod data (replicaset name, deployment name)
+// checks if pods have owner type ReplicaSet and returns pod data (replicaset name, replicaset name, maxpodCount)
 func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	data := PodData{}
-	isDeployment := false
-	replicasetName := ""
+	isReplicaSet := false
+	replicaSetName := ""
 	log := ppn.log.WithName(pod.Name)
 
 	// to reflect changes immediately we are adding annotation to pod
@@ -182,28 +181,27 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
 			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
-			replicasetName = owner.Name
-			isDeployment = true
+			replicaSetName = owner.Name
+			isReplicaSet = true
 			break
 		}
 	}
-	if !isDeployment {
+	if !isReplicaSet {
 		log.Info("Pod do not have owner type ReplicaSet")
 		return data, false
 	}
 
 	//get replicaset
-	replicaSet, err := ppn.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicasetName)
+	replicaSet, err := ppn.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicaSetName)
 	if err != nil {
 		log.Error(err, "Error getting replicaset from store")
 		return data, false
 	}
 
-	// extract deployment name from prelicaset name
-	data.deploymentName = replicasetName[:strings.LastIndexByte(replicasetName, '-')]
-
+	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
-	log.Info("Deployment info", "MaxPods", data.maxPodsPerNode, "Replicacount", data.replica)
+
+	log.Info("ReplicaSet info", "MaxPods", data.maxPodsPerNode, "Replicacount", data.replica)
 	return data, true
 }
 
@@ -236,25 +234,25 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 
 	podCount := 0
 	var re *regexp.Regexp
-	re, _ = regexp.Compile(podData.deploymentName + "-(.*)")
+	re, _ = regexp.Compile(podData.replicaSetName + "-(.*)")
 	for pod, ok := range podsSet {
 		if ok && re.MatchString(pod) {
 			podCount++
 		}
 	}
 
-	log.Info("Deployment info on node", "NodeName", node.Name, "PodCount", podCount, "replica Count",podData.replica,"maxPods",podData.maxPodsPerNode)
+	log.Info("ReplicaSet info on node", "NodeName", node.Name, "PodCount", podCount, "replica Count", podData.replica, "maxPods", podData.maxPodsPerNode)
 	// if replica count - defaultmaxpodspernode >= defaultMinPodsPerNode then pods should be schedule as one pod per node
 	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
 	if podData.replica <= defaultMinPodsPerNode || defaultMinPodsPerNode >= (podData.replica-defaultMaxPodsPerNode) {
 		if podCount == 0 {
 			return "", true
 		}
-		return "Cannot schedule: Already running default minimum pods: "+strconv.Itoa(defaultMinPodsPerNode), false
+		return "Cannot schedule: Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
 	}
 
 	if podData.maxPodsPerNode > podCount {
 		return "", true
 	}
-	return "Cannot schedule:Already running maximum number of pods:"+strconv.Itoa(podData.maxPodsPerNode), false
+	return "Cannot schedule:Already running maximum number of pods:" + strconv.Itoa(podData.maxPodsPerNode), false
 }
