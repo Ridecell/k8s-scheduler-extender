@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/ReneKroon/ttlcache/v2 v2.11.0
 	github.com/go-logr/logr v1.2.2
+	go.uber.org/zap v1.19.1
 	k8s.io/api v0.23.4
 	k8s.io/client-go v0.23.4
 	k8s.io/kube-scheduler v0.23.4
@@ -26,7 +27,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.19.1 // indirect
 	golang.org/x/net v0.0.0-20211209124913-491a49abca63 // indirect
 	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect

@@ -73,7 +73,7 @@ func main() {
 	goClinetCache.WaitForCacheSync(stopCh)
 
 	http.HandleFunc("/index", routes.Index)
-	http.HandleFunc("/podspernode/filter", p.PodsPerNodeFilter)
+	http.HandleFunc("/api/podspernode/filter", p.PodsPerNodeFilter)
 	s := &http.Server{
 		Addr: ":8080",
 	}

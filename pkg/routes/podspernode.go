@@ -67,7 +67,7 @@ func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr
 	return b
 }
 
-// Handles POST request received at '/podspernode/filter'
+// Handles POST request received at 'api/podspernode/filter'
 func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		return
@@ -125,8 +125,8 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 	}
 	var podNames []string
 	for _, node := range args.Nodes.Items {
-		msg, ok := ppn.canFit(node, args.Pod, podData)
-		if ok {
+		msg, yes := ppn.canFit(node, args.Pod, podData)
+		if yes {
 			log.Info("can be schedule on node", "NodeName", node.Name)
 			val, err := ppn.ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
@@ -167,7 +167,7 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	log := ppn.log.WithName(pod.Name)
 
 	// to reflect changes immediately we are adding annotation to pod
-	if podsPerNode, ok := pod.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; ok {
+	if podsPerNode, yes := pod.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; yes {
 		if podsPerNode != "" {
 			data.maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
 		} else {
@@ -235,8 +235,8 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	podCount := 0
 	var re *regexp.Regexp
 	re, _ = regexp.Compile(podData.replicaSetName + "-(.*)")
-	for pod, ok := range podsSet {
-		if ok && re.MatchString(pod) {
+	for pod, _ := range podsSet {
+		if re.MatchString(pod) {
 			podCount++
 		}
 	}
@@ -248,11 +248,11 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 		if podCount == 0 {
 			return "", true
 		}
-		return "Cannot schedule: Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
+		return "Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
 	}
 
 	if podData.maxPodsPerNode > podCount {
 		return "", true
 	}
-	return "Cannot schedule:Already running maximum number of pods:" + strconv.Itoa(podData.maxPodsPerNode), false
+	return "Already running maximum number of pods:" + strconv.Itoa(podData.maxPodsPerNode), false
 }
