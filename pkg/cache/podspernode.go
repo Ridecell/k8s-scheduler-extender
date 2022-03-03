@@ -42,7 +42,7 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 				log.V(1).Info("cannot convert to", "*v1.Pod:", old)
 				return
 			}
-			c.updatettlCache(pod,ttlCache)
+			c.updatettlCache(pod, ttlCache)
 			log.V(1).Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
 		},
 	})
@@ -61,8 +61,8 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 	return podInformer
 }
 
-func  (ppn *Cache)updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
-	log:=ppn.Log.WithName("ttlCache")
+func (ppn *Cache) updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
+	log := ppn.Log.WithName("ttlCache")
 	val, err := ttlCache.Get(pod.Spec.NodeName)
 	if err != nil && err != ttlcache.ErrNotFound {
 		log.Error(err, "ttlCache Error")
@@ -73,7 +73,10 @@ func  (ppn *Cache)updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
 			if pod.Name == podName {
 				podNames[i] = podNames[len(podNames)-1]
 				podNames = podNames[:len(podNames)-1]
-				ttlCache.Set(pod.Spec.NodeName, podNames)
+				err = ttlCache.Set(pod.Spec.NodeName, podNames)
+				if err != nil {
+					log.Error(err, "ttlCache Error")
+				}
 				log.Info("ttlCache Updated", "Deleted Pod", podName)
 				break
 			}

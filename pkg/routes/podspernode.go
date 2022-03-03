@@ -93,7 +93,10 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
-		w.Write([]byte(errMsg))
+		_,err=w.Write([]byte(errMsg))
+		if err != nil {
+			ppn.log.Error(err, "Error in writing response")
+		}
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -235,7 +238,7 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	podCount := 0
 	var re *regexp.Regexp
 	re, _ = regexp.Compile(podData.replicaSetName + "-(.*)")
-	for pod, _ := range podsSet {
+	for pod := range podsSet {
 		if re.MatchString(pod) {
 			podCount++
 		}
