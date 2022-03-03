@@ -30,7 +30,7 @@ jobs:
           golangci-lint run --timeout 5m
 
   docker:
-    runs-on: self-hosted
+    runs-on: ubuntu-20.04
     needs: [lint]
     if: ${{ github.ref == 'refs/heads/main'|| contains(github.event.head_commit.message, 'BUILD_CONTAINER_IMAGE') }}
     steps:
