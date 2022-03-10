@@ -8,6 +8,7 @@ import (
 
 	"github.com/Ridecell/k8s-scheduler-extender/pkg/routes"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
 
@@ -15,7 +16,6 @@ import (
 	goClinetCache "k8s.io/client-go/tools/cache"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 )
-
 
 func connectToK8s(logger *zap.Logger) *kubernetes.Clientset {
 	home, exists := os.LookupEnv("HOME")
@@ -29,22 +29,34 @@ func connectToK8s(logger *zap.Logger) *kubernetes.Clientset {
 	if err != nil {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			logger.Error("Failed to create K8s config",zap.String("Error",err.Error()))
+			logger.Error("Failed to create K8s config", zap.String("Error", err.Error()))
 		}
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		logger.Error("Failed to create K8s clientset",zap.String("Error",err.Error()))
+		logger.Error("Failed to create K8s clientset", zap.String("Error", err.Error()))
 	}
 
 	return clientset
 }
 
-
 func main() {
-	//init zap logger
-	log, _ := zap.NewDevelopment()
-	
+	//build custom zap logger
+	cfg := zap.Config{
+		Encoding:         "json",
+		Level:            zap.NewAtomicLevelAt(zapcore.InfoLevel),
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+		EncoderConfig: zapcore.EncoderConfig{
+			LevelKey:    "level",
+			EncodeLevel: zapcore.CapitalLevelEncoder,
+			TimeKey:    "ts",
+			EncodeTime: zapcore.RFC3339NanoTimeEncoder,
+			MessageKey: "msg",
+		},
+	}
+	log, _ := cfg.Build()
+
 	//init k8s client
 	clientset := connectToK8s(log)
 
@@ -62,6 +74,6 @@ func main() {
 	}
 
 	if err := s.ListenAndServe(); err != nil {
-		log.Error("Server error",zap.String("Error",err.Error()))
+		log.Error("Server error", zap.String("Error", err.Error()))
 	}
 }

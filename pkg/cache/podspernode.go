@@ -18,7 +18,7 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)
 			if !ok {
-				c.Log.Debug("cannot convert object to *v1.Pod", zap.Any("object", new))
+				c.Log.Error("cannot convert object to *v1.Pod", zap.Any("object", new))
 				return
 			}
 			c.Log.Debug("Pod Added", zap.String("PodName", pod.Name))
@@ -26,12 +26,12 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 		UpdateFunc: func(old, new interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				c.Log.Debug("cannot convert oldObj to *v1.Pod", zap.Any("*v1.Pod:", old))
+				c.Log.Error("cannot convert oldObj to *v1.Pod", zap.Any("*v1.Pod:", old))
 				return
 			}
 			_, ok = new.(*corev1.Pod)
 			if !ok {
-				c.Log.Debug("cannot convert newObj to *v1.Pod", zap.Any("*v1.Pod:", new))
+				c.Log.Error("cannot convert newObj to *v1.Pod", zap.Any("*v1.Pod:", new))
 				return
 			}
 			c.Log.Debug("Pod Updated", zap.String("PodName", pod.Name), zap.String("NodeName", pod.Spec.NodeName))
@@ -39,7 +39,7 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 		DeleteFunc: func(old interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				c.Log.Debug("cannot convert to", zap.Any("*v1.Pod", old))
+				c.Log.Error("cannot convert to", zap.Any("*v1.Pod", old))
 				return
 			}
 			c.updatettlCache(pod, ttlCache)
@@ -90,7 +90,7 @@ func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 		AddFunc: func(new interface{}) {
 			replicaSet, ok := new.(*appsv1.ReplicaSet)
 			if !ok {
-				c.Log.Debug("cannot convert to *appsv1.ReplicaSet", zap.Any("Object", new))
+				c.Log.Error("cannot convert to *appsv1.ReplicaSet", zap.Any("Object", new))
 				return
 			}
 			c.Log.Debug("Added ReplicaSet", zap.String("ReplicaSetName", replicaSet.Name))
@@ -98,12 +98,12 @@ func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 		UpdateFunc: func(old, new interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				c.Log.Debug("cannot convert oldObj to *appsv1.replicaSet:", zap.Any("Object", old))
+				c.Log.Error("cannot convert oldObj to *appsv1.replicaSet:", zap.Any("Object", old))
 				return
 			}
 			_, ok = new.(*appsv1.ReplicaSet)
 			if !ok {
-				c.Log.Debug("cannot convert newObj to *appsv1.replicaSet:", zap.Any("Object", new))
+				c.Log.Error("cannot convert newObj to *appsv1.replicaSet:", zap.Any("Object", new))
 				return
 			}
 			c.Log.Debug("Updated ReplicaSet", zap.String("ReplicasetName", replicaSet.Name))
@@ -111,7 +111,7 @@ func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 		DeleteFunc: func(old interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				c.Log.Debug("cannot convert to *appsv1.replicaSet", zap.Any("Object", old))
+				c.Log.Error("cannot convert to *appsv1.replicaSet", zap.Any("Object", old))
 				return
 			}
 			c.Log.Debug("ReplicaSet Deleted", zap.String("ReplicaSetName", replicaSet.Name))

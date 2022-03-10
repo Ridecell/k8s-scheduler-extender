@@ -145,7 +145,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
-			ppn.log.Info(args.Pod.Name, zap.String("NodeName", node.Name), zap.String("Cannot schedule on node", msg))
+			ppn.log.Info(args.Pod.Name, zap.String("Cannot schedule on node", node.Name), zap.String("Reason", msg))
 		}
 	}
 
@@ -198,7 +198,7 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
 
-	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName),  zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32( "Replicacount", data.replica))
+	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName), zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32("Replicacount", data.replica))
 	return data, true
 }
 
