@@ -1,11 +1,11 @@
 package cache
 
 import (
-	"github.com/go-logr/logr"
+	"go.uber.org/zap"
 	"k8s.io/client-go/informers"
 )
 
 type Cache struct {
-	Log             logr.Logger
+	Log             *zap.Logger
 	InformerFactory informers.SharedInformerFactory
 }

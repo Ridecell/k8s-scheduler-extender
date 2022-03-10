@@ -12,7 +12,7 @@ import (
 
 	"github.com/ReneKroon/ttlcache/v2"
 	"github.com/Ridecell/k8s-scheduler-extender/pkg/cache"
-	"github.com/go-logr/logr"
+	"go.uber.org/zap"
 	"k8s.io/client-go/informers"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,7 +30,7 @@ const (
 type PodsPerNode struct {
 	podInformer      k8scache.SharedIndexInformer
 	replicaSetLister applister.ReplicaSetLister
-	log              logr.Logger
+	log              *zap.Logger
 	ttlCache         *ttlcache.Cache
 }
 
@@ -41,19 +41,18 @@ type PodData struct {
 }
 
 // Initializes ttl cache
-func GetTTLCache(logger logr.Logger) *ttlcache.Cache {
-	log := logger.WithName("ttl Cache")
+func GetTTLCache(log *zap.Logger) *ttlcache.Cache {
 	ttlCache := ttlcache.NewCache()
 	// it takes 1-2 seconds to schedule a pod on a node, so the indexer doesn’t get updated immediately so need to maintain a temporary cache  for a minute
 	err := ttlCache.SetTTL(time.Duration(1 * time.Minute))
 	if err != nil {
-		log.Error(err, "Failed to create ttl cache")
+		log.Error("Failed to create ttl cache", zap.String("Error", err.Error()))
 	}
 	return ttlCache
 }
 
 // Initializes informers
-func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr.Logger) (b *PodsPerNode) {
+func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger *zap.Logger) (b *PodsPerNode) {
 	c := cache.Cache{
 		Log:             logger,
 		InformerFactory: informerFactory,
@@ -63,7 +62,6 @@ func NewPodsPerNode(informerFactory informers.SharedInformerFactory, logger logr
 	b.replicaSetLister = c.GetReplicaSetLister()
 	b.ttlCache = GetTTLCache(logger)
 	b.podInformer = c.GetPodInformer(b.ttlCache)
-
 	return b
 }
 
@@ -78,7 +76,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 	var extenderFilterResult *schedulerapi.ExtenderFilterResult
 
 	if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
-		ppn.log.Error(err, "error in json decode")
+		ppn.log.Error(err.Error())
 		extenderFilterResult = &schedulerapi.ExtenderFilterResult{
 			Nodes:       nil,
 			FailedNodes: nil,
@@ -89,13 +87,13 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
-		ppn.log.Error(err, "Error in json marshal")
+		ppn.log.Error(err.Error(), zap.String("", ""))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
-		_,err=w.Write([]byte(errMsg))
+		_, err = w.Write([]byte(errMsg))
 		if err != nil {
-			ppn.log.Error(err, "Error in writing response")
+			ppn.log.Error("Error in writing response", zap.String("Error", err.Error()))
 		}
 	} else {
 		w.Header().Set("Content-Type", "application/json")
@@ -105,7 +103,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 		}
 		_, err := w.Write(response)
 		if err != nil {
-			ppn.log.Error(err, "Error in writing response")
+			ppn.log.Error("Error in writing response", zap.String("Error", err.Error()))
 		}
 	}
 }
@@ -114,26 +112,24 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs) *schedulerapi.ExtenderFilterResult {
 
 	var canSchedule []corev1.Node
-
-	ppn.log.Info("Request for Pod", "PodName", args.Pod.Name)
-	log := ppn.log.WithName(args.Pod.Name)
+	ppn.log.Info("Request for Pod", zap.String("PodName", args.Pod.Name))
 	podData, yes := ppn.isSchedulable(args.Pod)
 	if !yes {
 		result := schedulerapi.ExtenderFilterResult{
 			Nodes: args.Nodes,
 			Error: "",
 		}
-		log.Info("Skipping Pod, annotation not present or its owner type is not a replicaset")
+		ppn.log.Info("Skipping Pod, annotation not present or its owner type is not a replicaset")
 		return &result
 	}
 	var podNames []string
 	for _, node := range args.Nodes.Items {
 		msg, yes := ppn.canFit(node, args.Pod, podData)
 		if yes {
-			log.Info("can be schedule on node", "NodeName", node.Name)
+			ppn.log.Info(args.Pod.Name, zap.String("can be schedule on node", node.Name))
 			val, err := ppn.ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
-				log.Error(err, "ttl Cache Error")
+				ppn.log.Error(args.Pod.Name, zap.String("Msg", err.Error()))
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, args.Pod.Name)
@@ -143,13 +139,13 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 			}
 			err = ppn.ttlCache.Set(node.Name, podNames)
 			if err != nil {
-				log.Error(err, "Set ttl cache error")
+				ppn.log.Error(args.Pod.Name, zap.String("Msg", err.Error()))
 			}
-			log.Info("Pod added in ttlCache", "PodName", args.Pod.Name)
+			// ppn.log.Info(args.Pod.Name, zap.String("pod added in ttl", args.Pod.Name))
 			canSchedule = append(canSchedule, node)
 			break
 		} else {
-			log.Info("Cannot schedule on node", "NodeName", node.Name, "Reason", msg)
+			ppn.log.Info(args.Pod.Name, zap.String("NodeName", node.Name), zap.String("Cannot schedule on node", msg))
 		}
 	}
 
@@ -167,7 +163,6 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	data := PodData{}
 	isReplicaSet := false
 	replicaSetName := ""
-	log := ppn.log.WithName(pod.Name)
 
 	// to reflect changes immediately we are adding annotation to pod
 	if podsPerNode, yes := pod.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; yes {
@@ -183,34 +178,32 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	// Get replica name
 	for _, owner := range pod.OwnerReferences {
 		if owner.Kind == "ReplicaSet" {
-			log.Info("Its of replicaset", "ReplicaSetName", owner.Name)
 			replicaSetName = owner.Name
 			isReplicaSet = true
 			break
 		}
 	}
 	if !isReplicaSet {
-		log.Info("Pod do not have owner type ReplicaSet")
+		ppn.log.Info("Pod do not have owner type ReplicaSet")
 		return data, false
 	}
 
 	//get replicaset
 	replicaSet, err := ppn.replicaSetLister.ReplicaSets(pod.Namespace).Get(replicaSetName)
 	if err != nil {
-		log.Error(err, "Error getting replicaset from store")
+		ppn.log.Error(pod.Name, zap.String("Error", err.Error()))
 		return data, false
 	}
 
 	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
 
-	log.Info("ReplicaSet info", "MaxPods", data.maxPodsPerNode, "Replicacount", data.replica)
+	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName),  zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32( "Replicacount", data.replica))
 	return data, true
 }
 
 //It checks if node is valid for pod to schedule
 func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodData) (string, bool) {
-	log := ppn.log.WithName(pod.Name)
 	podsOnNode, err := ppn.podInformer.GetIndexer().ByIndex("nodename", node.Name)
 	if err != nil {
 		return err.Error(), false
@@ -226,7 +219,7 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 
 	ttlPods, err := ppn.ttlCache.Get(node.Name)
 	if err != nil && err != ttlcache.ErrNotFound {
-		log.Error(err, "Failed get node from ttlcache")
+		ppn.log.Error(pod.Name, zap.String("Error", err.Error()))
 	}
 
 	if ttlPods != nil {
@@ -244,7 +237,7 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 		}
 	}
 
-	log.Info("ReplicaSet info on node", "NodeName", node.Name, "PodCount", podCount, "replica Count", podData.replica, "maxPods", podData.maxPodsPerNode)
+	ppn.log.Info(pod.Name, zap.String("ReplicaSet", podData.replicaSetName), zap.String("NodeName", node.Name), zap.Int("PodCount", podCount), zap.Int32("replica Count", podData.replica), zap.Int("maxPods", podData.maxPodsPerNode))
 	// if replica count - defaultmaxpodspernode >= defaultMinPodsPerNode then pods should be schedule as one pod per node
 	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
 	if podData.replica <= defaultMinPodsPerNode || defaultMinPodsPerNode >= (podData.replica-defaultMaxPodsPerNode) {

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"github.com/ReneKroon/ttlcache/v2"
+	"go.uber.org/zap"
 	"k8s.io/client-go/tools/cache"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -12,38 +13,37 @@ import (
 // Creates a PodInformer and indexer, watches events and returns informer
 func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInformer {
 	// watch events
-	log := c.Log.WithName("Pod Informer")
 	podInformer := c.InformerFactory.Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			pod, ok := new.(*corev1.Pod)
 			if !ok {
-				log.V(1).Info("cannot convert to *v1.Pod:", new)
+				c.Log.Debug("cannot convert object to *v1.Pod", zap.Any("object", new))
 				return
 			}
-			log.V(1).Info("Added", "Pod:", pod.Name)
+			c.Log.Debug("Pod Added", zap.String("PodName", pod.Name))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				log.V(1).Info("cannot convert oldObj to", "*v1.Pod:", old)
+				c.Log.Debug("cannot convert oldObj to *v1.Pod", zap.Any("*v1.Pod:", old))
 				return
 			}
 			_, ok = new.(*corev1.Pod)
 			if !ok {
-				log.V(1).Info("cannot convert newObj to", "*v1.Pod:", new)
+				c.Log.Debug("cannot convert newObj to *v1.Pod", zap.Any("*v1.Pod:", new))
 				return
 			}
-			log.V(1).Info("Updated", "Pod:", pod.Name, "NodeName", pod.Spec.NodeName)
+			c.Log.Debug("Pod Updated", zap.String("PodName", pod.Name), zap.String("NodeName", pod.Spec.NodeName))
 		},
 		DeleteFunc: func(old interface{}) {
 			pod, ok := old.(*corev1.Pod)
 			if !ok {
-				log.V(1).Info("cannot convert to", "*v1.Pod:", old)
+				c.Log.Debug("cannot convert to", zap.Any("*v1.Pod", old))
 				return
 			}
 			c.updatettlCache(pod, ttlCache)
-			log.V(1).Info("Deleted", "Pod", pod.Name, "NodeName", pod.Spec.NodeName)
+			c.Log.Debug("Pod Deleted", zap.String("PodName", pod.Name), zap.String("NodeName", pod.Spec.NodeName))
 		},
 	})
 	//create indexer with index 'nodename'
@@ -55,17 +55,16 @@ func (c *Cache) GetPodInformer(ttlCache *ttlcache.Cache) cache.SharedIndexInform
 		},
 	})
 	if err != nil {
-		log.Error(err, "Informer error")
+		c.Log.Error("Informer error", zap.String("Error", err.Error()))
 	}
 
 	return podInformer
 }
 
-func (ppn *Cache) updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
-	log := ppn.Log.WithName("ttlCache")
+func (c *Cache) updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
 	val, err := ttlCache.Get(pod.Spec.NodeName)
 	if err != nil && err != ttlcache.ErrNotFound {
-		log.Error(err, "ttlCache Error")
+		c.Log.Error("ttlCache", zap.String("Error", err.Error()))
 	}
 	if val != nil {
 		podNames := val.([]string)
@@ -75,9 +74,9 @@ func (ppn *Cache) updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
 				podNames = podNames[:len(podNames)-1]
 				err = ttlCache.Set(pod.Spec.NodeName, podNames)
 				if err != nil {
-					log.Error(err, "ttlCache Error")
+					c.Log.Error("ttlCache", zap.String("Error", err.Error()))
 				}
-				log.Info("ttlCache Updated", "Deleted Pod", podName)
+				c.Log.Info("ttlCache", zap.String("Deleted Pod", podName))
 				break
 			}
 		}
@@ -85,40 +84,39 @@ func (ppn *Cache) updatettlCache(pod *corev1.Pod, ttlCache *ttlcache.Cache) {
 }
 
 // Creates a ReplicaSet informer, watches event and returns a Replicaset lister
-func (ppn *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
-	log := ppn.Log.WithName("ReplicaSet Informer")
-	replicaSetInformer := ppn.InformerFactory.Apps().V1().ReplicaSets().Informer()
+func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
+	replicaSetInformer := c.InformerFactory.Apps().V1().ReplicaSets().Informer()
 	replicaSetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(new interface{}) {
 			replicaSet, ok := new.(*appsv1.ReplicaSet)
 			if !ok {
-				log.V(1).Info("cannot convert to", "*appsv1.ReplicaSet:", new)
+				c.Log.Debug("cannot convert to *appsv1.ReplicaSet", zap.Any("Object", new))
 				return
 			}
-			log.V(1).Info("Added", "ReplicaSet:", replicaSet.Name)
+			c.Log.Debug("Added ReplicaSet", zap.String("ReplicaSetName", replicaSet.Name))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				log.V(1).Info("cannot convert oldObj to", "*appsv1.replicaSet:", old)
+				c.Log.Debug("cannot convert oldObj to *appsv1.replicaSet:", zap.Any("Object", old))
 				return
 			}
 			_, ok = new.(*appsv1.ReplicaSet)
 			if !ok {
-				log.V(1).Info("cannot convert newObj to", "*appsv1.replicaSet:", new)
+				c.Log.Debug("cannot convert newObj to *appsv1.replicaSet:", zap.Any("Object", new))
 				return
 			}
-			log.V(1).Info("Updated", "Replicaset:", replicaSet.Name)
+			c.Log.Debug("Updated ReplicaSet", zap.String("ReplicasetName", replicaSet.Name))
 		},
 		DeleteFunc: func(old interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
 			if !ok {
-				log.V(1).Info("cannot convert to", "*appsv1.replicaSet:", old)
+				c.Log.Debug("cannot convert to *appsv1.replicaSet", zap.Any("Object", old))
 				return
 			}
-			log.V(1).Info("Deleted", "ReplicaSet:", replicaSet.Name)
+			c.Log.Debug("ReplicaSet Deleted", zap.String("ReplicaSetName", replicaSet.Name))
 		},
 	})
-	replicaSetLister := ppn.InformerFactory.Apps().V1().ReplicaSets().Lister()
+	replicaSetLister := c.InformerFactory.Apps().V1().ReplicaSets().Lister()
 	return replicaSetLister
 }

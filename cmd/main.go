@@ -1,27 +1,23 @@
 package main
 
 import (
-	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/Ridecell/k8s-scheduler-extender/pkg/routes"
-	"github.com/go-logr/logr"
-	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	kubernetes "k8s.io/client-go/kubernetes"
 	goClinetCache "k8s.io/client-go/tools/cache"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 )
 
-var logger logr.Logger
 
-func connectToK8s(logger logr.Logger) *kubernetes.Clientset {
+func connectToK8s(logger *zap.Logger) *kubernetes.Clientset {
 	home, exists := os.LookupEnv("HOME")
 	if !exists {
 		home = "/root"
@@ -33,41 +29,28 @@ func connectToK8s(logger logr.Logger) *kubernetes.Clientset {
 	if err != nil {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			logger.Error(err, "failed to create K8s config")
+			logger.Error("Failed to create K8s config",zap.String("Error",err.Error()))
 		}
 	}
-
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		logger.Error(err, "Failed to create K8s clientset")
+		logger.Error("Failed to create K8s clientset",zap.String("Error",err.Error()))
 	}
 
 	return clientset
 }
 
-func createLogger() logr.Logger {
-	opts := zap.Options{
-		Development: true,
-		TimeEncoder: zapcore.RFC3339TimeEncoder,
-		Level:       zapcore.DebugLevel,
-	}
-	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
-	logger = zap.New(zap.UseFlagOptions(&opts))
-	return logger
-}
 
 func main() {
 	//init zap logger
-	logger := createLogger()
-	log := logger.WithName("Main")
-
+	log, _ := zap.NewDevelopment()
+	
 	//init k8s client
 	clientset := connectToK8s(log)
 
 	// setup k8s informer factory
 	informerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	p := routes.NewPodsPerNode(informerFactory, logger)
+	p := routes.NewPodsPerNode(informerFactory, log)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
 	goClinetCache.WaitForCacheSync(stopCh)
@@ -79,6 +62,6 @@ func main() {
 	}
 
 	if err := s.ListenAndServe(); err != nil {
-		log.Error(err, "Server error")
+		log.Error("Server error",zap.String("Error",err.Error()))
 	}
 }
