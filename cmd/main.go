@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	kubernetes "k8s.io/client-go/kubernetes"
-	goClinetCache "k8s.io/client-go/tools/cache"
+	goClientCache "k8s.io/client-go/tools/cache"
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 )
 
@@ -65,7 +65,7 @@ func main() {
 	p := routes.NewPodsPerNode(informerFactory, log)
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
-	goClinetCache.WaitForCacheSync(stopCh)
+	goClientCache.WaitForCacheSync(stopCh)
 
 	http.HandleFunc("/index", routes.Index)
 	http.HandleFunc("/api/podspernode/filter", p.PodsPerNodeFilter)

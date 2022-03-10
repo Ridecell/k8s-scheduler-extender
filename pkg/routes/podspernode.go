@@ -87,7 +87,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilter(w http.ResponseWriter, r *http.Request
 	}
 
 	if response, err := json.Marshal(extenderFilterResult); err != nil {
-		ppn.log.Error(err.Error(), zap.String("", ""))
+		ppn.log.Error(err.Error())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
@@ -129,7 +129,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 			ppn.log.Info(args.Pod.Name, zap.String("can be schedule on node", node.Name))
 			val, err := ppn.ttlCache.Get(node.Name)
 			if err != nil && err != ttlcache.ErrNotFound {
-				ppn.log.Error(args.Pod.Name, zap.String("Msg", err.Error()))
+				ppn.log.Error(args.Pod.Name, zap.String("Error", err.Error()))
 			}
 			if err == ttlcache.ErrNotFound {
 				podNames = append(podNames, args.Pod.Name)
@@ -139,7 +139,7 @@ func (ppn *PodsPerNode) PodsPerNodeFilterHandler(args schedulerapi.ExtenderArgs)
 			}
 			err = ppn.ttlCache.Set(node.Name, podNames)
 			if err != nil {
-				ppn.log.Error(args.Pod.Name, zap.String("Msg", err.Error()))
+				ppn.log.Error(args.Pod.Name, zap.String("Error", err.Error()))
 			}
 			// ppn.log.Info(args.Pod.Name, zap.String("pod added in ttl", args.Pod.Name))
 			canSchedule = append(canSchedule, node)

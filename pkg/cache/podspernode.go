@@ -93,7 +93,7 @@ func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 				c.Log.Error("cannot convert to *appsv1.ReplicaSet", zap.Any("Object", new))
 				return
 			}
-			c.Log.Debug("Added ReplicaSet", zap.String("ReplicaSetName", replicaSet.Name))
+			c.Log.Debug("ReplicaSet Added", zap.String("ReplicaSetName", replicaSet.Name))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
@@ -106,7 +106,7 @@ func (c *Cache) GetReplicaSetLister() v1.ReplicaSetLister {
 				c.Log.Error("cannot convert newObj to *appsv1.replicaSet:", zap.Any("Object", new))
 				return
 			}
-			c.Log.Debug("Updated ReplicaSet", zap.String("ReplicasetName", replicaSet.Name))
+			c.Log.Debug("ReplicaSet Updated", zap.String("ReplicasetName", replicaSet.Name))
 		},
 		DeleteFunc: func(old interface{}) {
 			replicaSet, ok := old.(*appsv1.ReplicaSet)
