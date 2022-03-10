@@ -42,20 +42,20 @@ func connectToK8s(logger *zap.Logger) *kubernetes.Clientset {
 
 func main() {
 	//build custom zap logger
-	cfg := zap.Config{
+	config := zap.Config{
 		Encoding:         "json",
 		Level:            zap.NewAtomicLevelAt(zapcore.InfoLevel),
-		OutputPaths:      []string{"stderr"},
+		OutputPaths:      []string{"stdout"},
 		ErrorOutputPaths: []string{"stderr"},
 		EncoderConfig: zapcore.EncoderConfig{
 			LevelKey:    "level",
 			EncodeLevel: zapcore.CapitalLevelEncoder,
-			TimeKey:    "ts",
-			EncodeTime: zapcore.RFC3339NanoTimeEncoder,
-			MessageKey: "msg",
+			TimeKey:     "ts",
+			EncodeTime:  zapcore.RFC3339NanoTimeEncoder,
+			MessageKey:  "msg",
 		},
 	}
-	log, _ := cfg.Build()
+	log, _ := config.Build()
 
 	//init k8s client
 	clientset := connectToK8s(log)
