@@ -197,11 +197,6 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 
 	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
-	
-	// if annotation value is greater than replica count, then assign defaultMaxPodCount 
-	if data.maxPodsPerNode > int(data.replica) {
-		data.maxPodsPerNode = defaultMaxPodsPerNode
-	}
 
 	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName), zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32("Replicacount", data.replica))
 	return data, true
@@ -215,11 +210,10 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	}
 
 	// create map of pod names using both ttl cache and informer cache. Here value key does not matter in map.
-	// bcz We are uisng map as set here.
+	// bcz We are using map as set here.
 	podsSet := make(map[string]bool)
 	for _, pod := range podsOnNode {
 		podsSet[pod.(*corev1.Pod).Name] = true
-
 	}
 
 	ttlPods, err := ppn.ttlCache.Get(node.Name)
@@ -243,9 +237,9 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	}
 
 	ppn.log.Info(pod.Name, zap.String("ReplicaSet", podData.replicaSetName), zap.String("NodeName", node.Name), zap.Int("PodCount", podCount), zap.Int32("replica Count", podData.replica), zap.Int("maxPods", podData.maxPodsPerNode))
-	// if replica count - defaultmaxpodspernode >= defaultMinPodsPerNode then pods should be schedule as one pod per node
+	// if replica count - maxpodspernode (annotation value) >= defaultMinPodsPerNode then pods should be schedule as one pod per node
 	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
-	if defaultMinPodsPerNode >= (podData.replica - defaultMaxPodsPerNode) {
+	if defaultMinPodsPerNode >= (podData.replica - int32(podData.maxPodsPerNode)) {
 		if podCount == 0 {
 			return "", true
 		}
