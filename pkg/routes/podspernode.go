@@ -166,10 +166,10 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 
 	// to reflect changes immediately we are adding annotation to pod
 	if podsPerNode, yes := pod.Annotations["k8s-scheduler-extender.ridecell.io/maxPodsPerNode"]; yes {
-		if podsPerNode != "" {
-			data.maxPodsPerNode, _ = strconv.Atoi(podsPerNode)
-		} else {
+		if maxPodsPerNode, err := strconv.Atoi(podsPerNode); err != nil {
 			data.maxPodsPerNode = defaultMaxPodsPerNode
+		} else {
+			data.maxPodsPerNode = maxPodsPerNode
 		}
 	} else {
 		return data, false
@@ -197,6 +197,11 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 
 	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
+	
+	// if annotation value is greater than replica count, then assign defaultMaxPodCount 
+	if data.maxPodsPerNode > int(data.replica) {
+		data.maxPodsPerNode = defaultMaxPodsPerNode
+	}
 
 	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName), zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32("Replicacount", data.replica))
 	return data, true
@@ -240,7 +245,7 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	ppn.log.Info(pod.Name, zap.String("ReplicaSet", podData.replicaSetName), zap.String("NodeName", node.Name), zap.Int("PodCount", podCount), zap.Int32("replica Count", podData.replica), zap.Int("maxPods", podData.maxPodsPerNode))
 	// if replica count - defaultmaxpodspernode >= defaultMinPodsPerNode then pods should be schedule as one pod per node
 	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
-	if podData.replica <= defaultMinPodsPerNode || defaultMinPodsPerNode >= (podData.replica-defaultMaxPodsPerNode) {
+	if defaultMinPodsPerNode >= (podData.replica - defaultMaxPodsPerNode) {
 		if podCount == 0 {
 			return "", true
 		}
