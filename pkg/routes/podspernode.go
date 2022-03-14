@@ -241,13 +241,15 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 	if podCount == 0 {
 		return "", true
 	} else {
-		// if annotation value is greater than replica count then schedule 1 pod per node
-		if podData.maxPodsPerNode >= int(podData.replica)-1 {
-			return "Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
-		}                             
-		if podData.maxPodsPerNode > podCount   {
+		// if annotation value (maxPodsPerNode) is greater than or equal to replica count then schedule 1 pod per node
+		if podData.maxPodsPerNode >= int(podData.replica) {
+			if podCount > 0 {
+				return fmt.Sprintf("Already running %d pods. Criteria not matched", podCount), false
+			}
+		}
+		if podData.maxPodsPerNode > podCount {
 			return "", true
 		}
 	}
-	return "Already running maximum number of pods: " + strconv.Itoa(podData.maxPodsPerNode), false
+	return "No criteria matched", false
 }
