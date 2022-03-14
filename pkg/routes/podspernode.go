@@ -198,7 +198,7 @@ func (ppn *PodsPerNode) isSchedulable(pod *corev1.Pod) (PodData, bool) {
 	data.replicaSetName = replicaSetName
 	data.replica = *replicaSet.Spec.Replicas
 
-	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName), zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32("Replicacount", data.replica))
+	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", replicaSetName), zap.Int("MaxPods", data.maxPodsPerNode), zap.Int32("ReplicaCount", data.replica))
 	return data, true
 }
 
@@ -236,18 +236,18 @@ func (ppn *PodsPerNode) canFit(node corev1.Node, pod *corev1.Pod, podData PodDat
 		}
 	}
 
-	ppn.log.Info(pod.Name, zap.String("ReplicaSet", podData.replicaSetName), zap.String("NodeName", node.Name), zap.Int("PodCount", podCount), zap.Int32("replica Count", podData.replica), zap.Int("maxPods", podData.maxPodsPerNode))
-	// if replica count - maxpodspernode (annotation value) >= defaultMinPodsPerNode then pods should be schedule as one pod per node
-	// eg. If replica count is 2, then (2-2) = 0 <=1 -> true then pods should be scheduled on separate nodes
-	if defaultMinPodsPerNode >= (podData.replica - int32(podData.maxPodsPerNode)) {
-		if podCount == 0 {
+	ppn.log.Info(pod.Name, zap.String("ReplicaSetName", podData.replicaSetName), zap.String("NodeName", node.Name), zap.Int("PodCount", podCount), zap.Int32("ReplicaCount", podData.replica), zap.Int("MaxPods", podData.maxPodsPerNode))
+
+	if podCount == 0 {
+		return "", true
+	} else {
+		// if annotation value is greater than replica count then schedule 1 pod per node
+		if podData.maxPodsPerNode >= int(podData.replica)-1 {
+			return "Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
+		}                             
+		if podData.maxPodsPerNode > podCount   {
 			return "", true
 		}
-		return "Already running default minimum pods: " + strconv.Itoa(defaultMinPodsPerNode), false
 	}
-
-	if podData.maxPodsPerNode > podCount {
-		return "", true
-	}
-	return "Already running maximum number of pods:" + strconv.Itoa(podData.maxPodsPerNode), false
+	return "Already running maximum number of pods: " + strconv.Itoa(podData.maxPodsPerNode), false
 }
