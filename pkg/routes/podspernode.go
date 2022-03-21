@@ -24,7 +24,6 @@ import (
 const (
 	// If you are using this extender then you are meant to run more than 1 pod per node
 	defaultMaxPodsPerNode = 2
-	defaultMinPodsPerNode = 1
 )
 
 type PodsPerNode struct {
