@@ -69,8 +69,12 @@ func main() {
 
 	http.HandleFunc("/index", routes.Index)
 	http.HandleFunc("/api/podspernode/filter", p.PodsPerNodeFilter)
+	port, exists := os.LookupEnv("PORT")
+	if !exists {
+		port = "8086"
+	}
 	s := &http.Server{
-		Addr: ":8080",
+		Addr: ":" + port,
 	}
 
 	if err := s.ListenAndServe(); err != nil {
