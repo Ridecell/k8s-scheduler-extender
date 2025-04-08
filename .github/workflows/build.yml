@@ -7,14 +7,14 @@ jobs:
     name: lint
     runs-on: ubuntu-20.04
     env:
-      TOKEN: ${{ secrets.USER_GITHUB_TOKEN }}
+      TOKEN: ${{ secrets.RIDECELL_PUBLIC_REPO_TOKEN }}
     steps:
       - name: Setup go 1.17
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
@@ -59,7 +59,7 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
